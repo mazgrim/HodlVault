@@ -1,0 +1,211 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens. Each variable is an "R G B" triplet consumed by Tailwind via
+ * rgb(var(--x) / <alpha-value>) so opacity modifiers keep working.
+ * :root holds the dark theme (default). html.light overrides for light theme.
+ */
+:root {
+  /* Native form controls (checkbox, date picker, scrollbars) follow the theme */
+  color-scheme: dark;
+
+  --c-gold-300: 234 199 110;
+  --c-gold-400: 229 188 59;
+  --c-gold-500: 212 160 23;
+  --c-gold-600: 200 150 12;
+  --c-gold-700: 168 122 10;
+
+  --c-navy-900: 15 15 26;
+  --c-navy-800: 19 19 31;
+  --c-navy-700: 26 26 46;
+  --c-navy-600: 35 35 55;
+
+  --c-surface-50: 26 26 46;
+  --c-surface-100: 22 33 62;
+  --c-surface-200: 15 52 96;
+  --c-surface-800: 13 13 26;
+  --c-surface-900: 10 10 20;
+
+  --c-gray-100: 243 244 246;
+  --c-gray-200: 229 231 235;
+  --c-gray-300: 209 213 219;
+  --c-gray-400: 156 163 175;
+  --c-gray-500: 107 114 128;
+  --c-gray-600: 75 85 99;
+  --c-gray-700: 55 65 81;
+  --c-gray-800: 31 41 55;
+
+  --c-em-400: 52 211 153;
+  --c-em-700: 4 120 87;
+  --c-em-900: 6 78 59;
+
+  --c-red-300: 252 165 165;
+  --c-red-400: 248 113 113;
+  --c-red-700: 185 28 28;
+  --c-red-800: 153 27 27;
+  --c-red-900: 127 29 29;
+
+  /* Non-Tailwind tokens used in raw CSS below */
+  --c-chart-grid: 255 255 255;
+  --c-chart-grid-alpha: 0.06;
+  --c-tooltip-bg: 19 19 31;
+}
+
+html.light {
+  color-scheme: light;
+
+  /* Gold deepened for contrast on light surfaces */
+  --c-gold-300: 168 122 10;
+  --c-gold-400: 161 116 8;
+  --c-gold-500: 181 132 12;
+  --c-gold-600: 138 99 8;
+  --c-gold-700: 110 79 6;
+
+  /* App / panel backgrounds become light */
+  --c-navy-900: 241 245 249; /* app background */
+  --c-navy-800: 255 255 255; /* cards, sidebar */
+  --c-navy-700: 226 232 240; /* inputs, secondary buttons */
+  --c-navy-600: 203 213 225; /* hover */
+
+  --c-surface-50: 248 250 252;
+  --c-surface-100: 238 242 247;
+  --c-surface-200: 226 232 240;
+  --c-surface-800: 241 245 249;
+  --c-surface-900: 255 255 255;
+
+  /* Neutral ramp inverted: gray-100 = darkest text, gray-700 = subtle border */
+  --c-gray-100: 17 24 39;
+  --c-gray-200: 31 41 55;
+  --c-gray-300: 55 65 81;
+  --c-gray-400: 71 85 105;
+  --c-gray-500: 100 116 139;
+  --c-gray-600: 148 163 184;
+  --c-gray-700: 203 213 225;
+  --c-gray-800: 226 232 240;
+
+  /* Positive green: dark text, pale badge bg, light border */
+  --c-em-400: 5 150 105;
+  --c-em-700: 110 231 183;
+  --c-em-900: 209 250 229;
+
+  /* Negative red: dark text, pale badge bg, light border */
+  --c-red-300: 185 28 28;
+  --c-red-400: 220 38 38;
+  --c-red-700: 254 202 202;
+  --c-red-800: 254 226 226;
+  --c-red-900: 254 226 226;
+
+  --c-chart-grid: 15 23 42;
+  --c-chart-grid-alpha: 0.10;
+  --c-tooltip-bg: 255 255 255;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-navy-900 text-gray-100 antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-navy-800;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-600 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-navy-800 border border-gray-700/50 rounded-xl p-5;
+  }
+
+  .card-gold {
+    @apply card border-gold-500/40;
+  }
+
+  .btn-primary {
+    @apply bg-gold-500 hover:bg-gold-600 font-semibold px-4 py-2 rounded-lg
+           transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+    /* Fixed near-black text: stays readable on the gold button in both themes
+       (navy-900 is repurposed as a light background in light mode). */
+    color: #14110a;
+  }
+
+  .btn-secondary {
+    @apply bg-navy-700 hover:bg-navy-600 text-gray-200 font-medium px-4 py-2 rounded-lg
+           border border-gray-600/50 transition-colors duration-150;
+  }
+
+  .btn-danger {
+    @apply bg-red-900/40 hover:bg-red-800/60 text-red-300 font-medium px-4 py-2 rounded-lg
+           border border-red-700/40 transition-colors duration-150;
+  }
+
+  .input {
+    @apply bg-navy-700 border border-gray-600/60 rounded-lg px-3 py-2 text-gray-100
+           placeholder-gray-500 focus:outline-none focus:border-gold-500/70 focus:ring-1
+           focus:ring-gold-500/30 transition-colors w-full;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-gray-400 mb-1;
+  }
+
+  .kpi-positive {
+    @apply text-emerald-400;
+  }
+
+  .kpi-negative {
+    @apply text-red-400;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-green {
+    @apply badge bg-emerald-900/40 text-emerald-400 border border-emerald-700/30;
+  }
+
+  .badge-red {
+    @apply badge bg-red-900/40 text-red-400 border border-red-700/30;
+  }
+
+  .badge-gold {
+    @apply badge bg-gold-500/20 text-gold-500 border border-gold-500/30;
+  }
+
+  .table-row-hover {
+    @apply hover:bg-navy-700/50 transition-colors;
+  }
+}
+
+/* Recharts theme overrides (driven by theme tokens) */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: rgb(var(--c-chart-grid) / var(--c-chart-grid-alpha));
+}
+
+.recharts-text {
+  fill: rgb(var(--c-gray-400));
+  font-size: 12px;
+}
+
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: rgb(var(--c-tooltip-bg)) !important;
+  border: 1px solid rgb(var(--c-gold-500) / 0.3) !important;
+  border-radius: 8px !important;
+}

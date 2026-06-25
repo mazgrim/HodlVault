@@ -1,0 +1,320 @@
+import { useState, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import KpiCard from '../components/KpiCard'
+import PortfolioSelector from '../components/PortfolioSelector'
+import { PageSpinner } from '../components/Spinner'
+import { usePortfolios } from '../context/PortfoliosContext'
+import { marketApi } from '../api'
+import { fmtEur, fmtPct, fmtNum, fmtDate, pnlClass, pnlSign } from '../utils/format'
+import { useChartTheme } from '../utils/chartTheme'
+
+const PERIODS = ['1M', '3M', '6M', 'YTD', '1Y', 'All'] as const
+
+function fmtAge(days: number): { value: string; subtitle: string } {
+  if (days < 365) {
+    const months = Math.round(days / 30.5)
+    return {
+      value:    `${days}g`,
+      subtitle: months > 0 ? `${months} mes${months === 1 ? 'e' : 'i'}` : '',
+    }
+  }
+  const years  = Math.floor(days / 365)
+  const months = Math.round((days - years * 365) / 30.5)
+  const monthsNorm = months === 12 ? 0 : months          // edge-case: 11.5 → rounds to 12
+  const yearsNorm  = months === 12 ? years + 1 : years
+  return {
+    value:    monthsNorm > 0 ? `${yearsNorm}a ${monthsNorm}m` : `${yearsNorm}a`,
+    subtitle: `${days} giorni`,
+  }
+}
+
+interface KPIs {
+  total_value: number
+  total_invested: number
+  unrealized_pnl: number
+  unrealized_pnl_pct: number
+  realized_pnl: number
+  realized_trade_pnl: number
+  realized_dividends: number
+  total_pnl: number
+  annualized_return: number | null
+  portfolio_age_days: number
+  as_of_date: string
+}
+
+interface Position {
+  instrument_id: number
+  ticker: string
+  name: string
+  isin: string | null
+  asset_class: string
+  currency: string
+  quantity: number
+  avg_cost: number
+  current_price: number
+  current_price_orig: number
+  market_value: number
+  unrealized_pnl: number
+  unrealized_pnl_pct: number
+  weight_pct: number
+  total_invested: number
+}
+
+export default function Dashboard() {
+  const { tooltip } = useChartTheme()
+  const { portfolios, loading: pfLoading } = usePortfolios()
+  const [selectedPf, setSelectedPf] = useState<number | null>(null)
+  const [kpis, setKpis] = useState<KPIs | null>(null)
+  const [positions, setPositions] = useState<Position[]>([])
+  const [chart, setChart] = useState<{ date: string; value: number }[]>([])
+  const [period, setPeriod] = useState<string>('1Y')
+  const [loading, setLoading] = useState(true)
+  const [pnlMode, setPnlMode] = useState<'unrealized' | 'realized'>('unrealized')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [kRes, pRes, cRes] = await Promise.all([
+        marketApi.kpis(selectedPf ?? undefined),
+        marketApi.positions(selectedPf ?? undefined),
+        marketApi.chart(selectedPf ?? undefined, period),
+      ])
+      setKpis(kRes.data)
+      setPositions(pRes.data)
+      setChart(cRes.data.points)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedPf, period])
+
+  useEffect(() => { load() }, [load])
+
+  if (pfLoading) return <PageSpinner />
+
+  const chartData = chart.map((p) => ({ date: p.date, valore: p.value }))
+  const minVal = chart.length ? Math.min(...chart.map((p) => p.value)) * 0.98 : 0
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-gray-100">Dashboard</h1>
+        <PortfolioSelector portfolios={portfolios} selected={selectedPf} onChange={setSelectedPf} />
+      </div>
+
+      {loading ? (
+        <PageSpinner />
+      ) : (
+        <>
+          {/* KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <KpiCard
+              gold
+              center
+              title="Valore Totale"
+              value={fmtEur(kpis?.total_value ?? 0)}
+              subtitle={kpis?.as_of_date ? `Al ${fmtDate(kpis.as_of_date)}` : ''}
+            />
+
+            {/* P&L card — toggle Non Realizzato / Realizzato */}
+            <div className="card border-gray-700/40 flex flex-col items-center text-center gap-2">
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">P&amp;L</span>
+
+              {/* Toggle */}
+              <div className="inline-flex items-center gap-1 text-[11px] font-medium">
+                {([['unrealized', 'Non Realizzato'], ['realized', 'Realizzato']] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    onClick={() => setPnlMode(mode)}
+                    className={`px-2.5 py-0.5 rounded-full transition-colors ${
+                      pnlMode === mode
+                        ? 'bg-emerald-500 text-navy-900'
+                        : 'text-gray-400 hover:text-gray-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Value + detail */}
+              <div className="flex-1 flex flex-col justify-center">
+                {pnlMode === 'unrealized' ? (
+                  <>
+                    <div className="flex items-baseline justify-center gap-2 flex-wrap">
+                      <span className={`text-xl sm:text-2xl font-bold tabular-nums ${pnlClass(kpis?.unrealized_pnl ?? 0)}`}>
+                        {pnlSign(kpis?.unrealized_pnl ?? 0)}{fmtEur(kpis?.unrealized_pnl ?? 0)}
+                      </span>
+                      {kpis?.unrealized_pnl_pct !== undefined && (
+                        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+                          kpis.unrealized_pnl_pct >= 0 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                        }`}>
+                          {pnlSign(kpis.unrealized_pnl_pct)}{fmtPct(kpis.unrealized_pnl_pct)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-gray-600 mt-1">Plusvalenze su posizioni aperte</div>
+                  </>
+                ) : (
+                  <>
+                    <span className={`text-xl sm:text-2xl font-bold tabular-nums ${pnlClass(kpis?.realized_pnl ?? 0)}`}>
+                      {pnlSign(kpis?.realized_pnl ?? 0)}{fmtEur(kpis?.realized_pnl ?? 0)}
+                    </span>
+                    <div className="text-[11px] text-gray-500 mt-1.5 space-y-0.5">
+                      <div>Trade: {pnlSign(kpis?.realized_trade_pnl ?? 0)}{fmtEur(kpis?.realized_trade_pnl ?? 0)}</div>
+                      <div>Dividendi / Cedole: {pnlSign(kpis?.realized_dividends ?? 0)}{fmtEur(kpis?.realized_dividends ?? 0)}</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <KpiCard
+              center
+              title="Capitale Investito"
+              value={fmtEur(kpis?.total_invested ?? 0)}
+            />
+            <KpiCard
+              center
+              title="P&L Totale"
+              value={`${pnlSign(kpis?.total_pnl ?? 0)}${fmtEur(kpis?.total_pnl ?? 0)}`}
+              colorByValue={kpis?.total_pnl}
+              subtitle="Non Realizzato + Realizzato"
+            />
+            <KpiCard
+              center
+              title="Rendimento Annualizzato"
+              value={kpis?.annualized_return != null ? fmtPct(kpis.annualized_return, true) : 'N/D'}
+              subtitle={kpis?.annualized_return == null ? 'Storico insufficiente' : undefined}
+            />
+            <KpiCard
+              center
+              title="Età Portafoglio"
+              value={fmtAge(kpis?.portfolio_age_days ?? 0).value}
+              subtitle={fmtAge(kpis?.portfolio_age_days ?? 0).subtitle}
+            />
+          </div>
+
+          {/* Chart */}
+          <div className="card">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <h2 className="text-base font-semibold text-gray-200">Valore nel Tempo</h2>
+              <div className="flex gap-1 flex-wrap">
+                {PERIODS.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setPeriod(p)}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      period === p
+                        ? 'bg-gold-500/20 text-gold-500 border border-gold-500/30'
+                        : 'text-gray-400 hover:text-gray-200 hover:bg-navy-700'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {chartData.length === 0 ? (
+              <div className="flex items-center justify-center h-48 text-gray-500 text-sm">
+                Nessun dato disponibile. Importa delle transazioni per iniziare.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <AreaChart data={chartData}>
+                  <defs>
+                    <linearGradient id="valGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#D4A017" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#D4A017" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => v?.slice(5)} />
+                  <YAxis
+                    domain={[minVal, 'auto']}
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v) => `€${(v / 1000).toFixed(0)}k`}
+                    width={60}
+                  />
+                  <Tooltip
+                    formatter={(v: number) => [fmtEur(v), 'Valore']}
+                    labelFormatter={(l) => fmtDate(l)}
+                    contentStyle={tooltip()}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="valore"
+                    stroke="#D4A017"
+                    strokeWidth={2}
+                    fill="url(#valGrad)"
+                    dot={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Positions Table */}
+          <div className="card">
+            <h2 className="text-base font-semibold text-gray-200 mb-4">Posizioni Aperte</h2>
+            {positions.length === 0 ? (
+              <p className="text-gray-500 text-sm">Nessuna posizione aperta.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-700/50">
+                      {['Strumento', 'Qtà', 'Prezzo Medio', 'Prezzo Attuale', 'P&L €', 'P&L %', 'Valore', 'Peso %'].map((h) => (
+                        <th key={h} className="text-left py-2 pr-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {positions.map((pos) => (
+                      <tr key={pos.instrument_id} className="table-row-hover border-b border-gray-700/20">
+                        <td className="py-3 pr-4">
+                          <Link to={`/instruments/${pos.instrument_id}`} className="group">
+                            <div className="font-semibold text-gray-100 group-hover:text-gold-400 transition-colors truncate max-w-[200px]">{pos.name}</div>
+                            <div className="text-xs text-gray-500 font-mono mt-0.5">
+                              {pos.ticker}{pos.isin ? ` · ${pos.isin}` : ''}
+                            </div>
+                          </Link>
+                        </td>
+                        <td className="py-3 pr-4 tabular-nums text-gray-300">{fmtNum(pos.quantity, 4)}</td>
+                        <td className="py-3 pr-4 tabular-nums text-gray-300">{fmtEur(pos.avg_cost)}</td>
+                        <td className="py-3 pr-4">
+                          <div className="tabular-nums text-gray-300">{fmtEur(pos.current_price)}</div>
+                          <div className="text-xs text-gray-500">{pos.currency}</div>
+                        </td>
+                        <td className={`py-3 pr-4 tabular-nums font-medium ${pnlClass(pos.unrealized_pnl)}`}>
+                          {pnlSign(pos.unrealized_pnl)}{fmtEur(pos.unrealized_pnl)}
+                        </td>
+                        <td className={`py-3 pr-4 tabular-nums font-medium ${pnlClass(pos.unrealized_pnl_pct)}`}>
+                          {pnlSign(pos.unrealized_pnl_pct)}{fmtPct(pos.unrealized_pnl_pct)}
+                        </td>
+                        <td className="py-3 pr-4 tabular-nums text-gray-200 font-medium">{fmtEur(pos.market_value)}</td>
+                        <td className="py-3 tabular-nums text-gray-400">
+                          <div className="flex items-center gap-2">
+                            <div className="w-12 bg-navy-700 rounded-full h-1.5">
+                              <div className="bg-gold-500 h-1.5 rounded-full" style={{ width: `${Math.min(pos.weight_pct, 100)}%` }} />
+                            </div>
+                            <span>{pos.weight_pct.toFixed(1)}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}

@@ -48,14 +48,17 @@ async def _fetch_chart(
     range_: str = "5d",
     interval: str = "1d",
     client: Optional[httpx.AsyncClient] = None,
+    events: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Fetch Yahoo Finance chart data for *ticker*.
     Returns the first ``result`` dict (contains ``meta``, ``timestamp``,
-    ``indicators``) or None on failure.
+    ``indicators`` and, when ``events`` is set, ``events``) or None on failure.
     Falls back to query2 if query1 fails.
     """
     params = {"range": range_, "interval": interval, "includePrePost": "false"}
+    if events:
+        params["events"] = events
     own_client = client is None
     if own_client:
         client = httpx.AsyncClient(timeout=10.0)
@@ -76,6 +79,20 @@ async def _fetch_chart(
     finally:
         if own_client:
             await client.aclose()
+
+
+def _extract_dividends(result: dict) -> List[tuple]:
+    """Return list of (ex_date, amount_per_share) from a chart result's events.
+    Amount is the dividend per share in the security's own currency."""
+    divs = ((result.get("events") or {}).get("dividends")) or {}
+    out = []
+    for node in divs.values():
+        ts = node.get("date")
+        amt = node.get("amount")
+        if ts is None or amt is None:
+            continue
+        out.append((datetime.utcfromtimestamp(ts).date(), float(amt)))
+    return sorted(out)
 
 
 def _extract_prices(result: dict) -> List[tuple]:
@@ -556,6 +573,14 @@ class MarketService:
             self._upsert_price(inst.id, price_date, close, inst.currency)
         self.db.commit()
         logger.info(f"Historical prices loaded for {inst.ticker!r}: {len(prices)} rows")
+
+    async def fetch_dividend_history(self, ticker: str, range_: str = "10y") -> List[tuple]:
+        """Fetch the dividend (ex-date, amount-per-share) history for a ticker
+        from Yahoo. Amount is per share, in the security's own currency."""
+        result = await _fetch_chart(ticker, range_=range_, interval="1d", events="div")
+        if not result:
+            return []
+        return _extract_dividends(result)
 
     # ── Instrument price chart ────────────────────────────────────────────────
 

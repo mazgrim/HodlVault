@@ -137,14 +137,22 @@ async def import_confirm(
 
         fx_rate = await svc.get_fx_rate_for_date(row.currency, row.date)
         if row.is_dividend:
-            # Store the amount in its ORIGINAL currency + fx_rate; the calculator
-            # converts to EUR (amount / fx_rate). This matches manual entry and the
-            # demo seed — the previous pre-conversion here double-divided the FX rate.
+            # Store amounts in ORIGINAL currency + fx_rate; the calculator converts
+            # to EUR (amount / fx_rate). `row.price` is the LORDO; `row.fees` carries
+            # the broker's real withholding when available (es. Trade Republic).
+            # "CSV reale": use the real tax if present, otherwise net = gross (no tax
+            # invented — Fineco/Directa only report the net credited).
+            gross = round(row.price, 4)
+            tax = round(row.fees, 4) if row.fees else 0.0
             obj = models.DividendEvent(
                 portfolio_id=payload.portfolio_id,
                 instrument_id=instrument.id,
                 date=row.date,
-                amount=round(row.price, 4),
+                amount=round(gross - tax, 4),
+                gross_amount=gross,
+                foreign_tax_amount=0.0,
+                tax_amount=tax,
+                accrued_interest=0.0,
                 currency=row.currency,
                 fx_rate=fx_rate,
                 type=models.DividendType.DIVIDEND,

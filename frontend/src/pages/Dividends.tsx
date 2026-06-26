@@ -8,15 +8,17 @@ import { usePortfolios } from '../context/PortfoliosContext'
 import { divApi } from '../api'
 import { fmtEur, fmtPct, fmtDate, fmtMonth } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
-import { Landmark, TrendingUp, Calendar, Search, X, Trash2 } from 'lucide-react'
+import { Landmark, TrendingUp, Calendar, Search, X, Trash2, RefreshCw, Receipt } from 'lucide-react'
 
 interface DividendEvent {
   id: number; instrument_id: number; date: string; amount: number; currency: string; fx_rate: number
+  gross_amount: number | null; foreign_tax_amount: number; tax_amount: number; accrued_interest: number
+  foreign_tax_rate: number; italian_tax_rate: number
   type: string; instrument: { ticker: string; name: string; isin: string | null }
 }
 interface MonthlyDiv { month: string; amount: number }
 interface DivProjection { month: string; amount: number }
-interface KPIs { total_ytd: number; total_all_time: number; avg_yield_on_cost: number }
+interface KPIs { total_ytd: number; total_all_time: number; total_gross: number; total_tax: number; avg_yield_on_cost: number }
 
 export default function Dividends() {
   const { tooltip, neutralSeries, barCursor } = useChartTheme()
@@ -28,6 +30,8 @@ export default function Dividends() {
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [search, setSearch] = useState('')
@@ -143,6 +147,21 @@ export default function Dividends() {
     }
   }
 
+  const handleSync = async () => {
+    setSyncing(true)
+    setSyncMsg(null)
+    try {
+      const res = await divApi.sync(selectedPf ?? undefined)
+      const n = res.data?.created ?? 0
+      setSyncMsg(n > 0 ? `${n} nuovo${n === 1 ? '' : 'i'} dividend${n === 1 ? 'o' : 'i'} importat${n === 1 ? 'o' : 'i'}.` : 'Nessun nuovo dividendo da importare.')
+      if (n > 0) await load()
+    } catch {
+      setSyncMsg('Sincronizzazione non riuscita.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const clearFilters = () => {
     setSearch(''); setFilterType('ALL'); setDateFrom(''); setDateTo('')
   }
@@ -157,16 +176,30 @@ export default function Dividends() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-gray-100">Dividendi &amp; Cedole</h1>
-        <PortfolioSelector portfolios={portfolios} selected={selectedPf} onChange={setSelectedPf} />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="btn-secondary text-sm flex items-center gap-2 disabled:opacity-50"
+            title="Recupera da Yahoo lo storico dividendi degli strumenti posseduti"
+          >
+            <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'Sincronizzo…' : 'Sincronizza dividendi'}
+          </button>
+          <PortfolioSelector portfolios={portfolios} selected={selectedPf} onChange={setSelectedPf} />
+        </div>
       </div>
+      {syncMsg && <div className="text-xs text-gray-400">{syncMsg}</div>}
 
       {loading ? <PageSpinner /> : (
         <>
           {/* KPIs */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <KpiCard title="Totale YTD"         value={fmtEur(kpis?.total_ytd ?? 0)}          icon={<Landmark size={16} />} gold />
-            <KpiCard title="Totale Storico"      value={fmtEur(kpis?.total_all_time ?? 0)}     icon={<TrendingUp size={16} />} />
-            <KpiCard title="Yield on Cost Medio" value={fmtPct(kpis?.avg_yield_on_cost ?? 0)} icon={<Calendar size={16} />} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <KpiCard title="Totale Netto (storico)" value={fmtEur(kpis?.total_all_time ?? 0)} icon={<Landmark size={16} />} gold />
+            <KpiCard title="Totale Lordo"            value={fmtEur(kpis?.total_gross ?? 0)}    icon={<TrendingUp size={16} />} />
+            <KpiCard title="Totale Tasse"            value={fmtEur(kpis?.total_tax ?? 0)}      icon={<Receipt size={16} />} />
+            <KpiCard title="Netto YTD"               value={fmtEur(kpis?.total_ytd ?? 0)}      icon={<Calendar size={16} />} />
+            <KpiCard title="Yield on Cost Medio"     value={fmtPct(kpis?.avg_yield_on_cost ?? 0)} icon={<Calendar size={16} />} />
           </div>
 
           {/* Monthly bar chart */}
@@ -345,7 +378,7 @@ export default function Dividends() {
                           className="w-4 h-4 accent-gold-500 cursor-pointer"
                         />
                       </th>
-                      {['Data', 'Strumento', 'Tipo', 'Importo', 'Valuta', 'Importo EUR', ''].map(h => (
+                      {['Data', 'Strumento', 'Tipo', 'Lordo €', 'Tasse €', 'Netto €', ''].map(h => (
                         <th key={h} className="text-left py-2 pr-4 text-xs font-medium text-gray-400 uppercase last:pr-0">
                           {h}
                         </th>
@@ -384,13 +417,29 @@ export default function Dividends() {
                               {ev.type}
                             </span>
                           </td>
-                          <td className="py-2.5 pr-4 tabular-nums text-emerald-400 font-medium">
-                            {fmtEur(ev.amount)}
-                          </td>
-                          <td className="py-2.5 pr-4 text-gray-400">{ev.currency}</td>
-                          <td className="py-2.5 pr-4 tabular-nums text-gray-300">
-                            {fmtEur(ev.amount / (ev.fx_rate || 1))}
-                          </td>
+                          {(() => {
+                            const fx = ev.fx_rate || 1
+                            const grossEur = (ev.gross_amount ?? ev.amount) / fx
+                            const taxEur = ((ev.foreign_tax_amount || 0) + (ev.tax_amount || 0)) / fx
+                            const netEur = ev.amount / fx
+                            const fRate = Math.round((ev.foreign_tax_rate || 0) * 1000) / 10
+                            const iRate = Math.round((ev.italian_tax_rate || 0) * 1000) / 10
+                            const rateLabel = fRate > 0 ? `Est. ${fRate}% + IT ${iRate}%` : (iRate > 0 ? `IT ${iRate}%` : '—')
+                            return (
+                              <>
+                                <td className="py-2.5 pr-4 tabular-nums text-gray-300">{fmtEur(grossEur)}</td>
+                                <td className="py-2.5 pr-4 tabular-nums text-red-400">
+                                  {taxEur > 0 ? `−${fmtEur(taxEur)}` : '—'}
+                                </td>
+                                <td className="py-2.5 pr-4 tabular-nums text-emerald-400 font-medium">
+                                  {fmtEur(netEur)}
+                                  <div className="text-[10px] text-gray-500 font-normal" title="Aliquote stimate applicate">
+                                    {rateLabel}
+                                  </div>
+                                </td>
+                              </>
+                            )
+                          })()}
                           <td className="py-2.5">
                             <button
                               onClick={() => handleDelete(ev.id)}

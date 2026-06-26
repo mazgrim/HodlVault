@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..models import (
     Transaction, Portfolio, Instrument, PriceHistory, DividendEvent, FxRate, TransactionType,
-    EtfProfile, EtfHolding, EtfSectorWeight, EtfRegionWeight, SecurityProfile, AssetClass,
+    DividendType, EtfProfile, EtfHolding, EtfSectorWeight, EtfRegionWeight, SecurityProfile, AssetClass,
 )
 from .market import MarketService
 from . import taxonomy
@@ -898,11 +898,15 @@ class DividendCalculator:
         today = date.today()
         ytd_total = 0.0
         all_total = 0.0
+        gross_total = 0.0
+        tax_total = 0.0
         for ev in events:
-            amount_eur = ev.amount / ev.fx_rate if ev.fx_rate else ev.amount
-            all_total += amount_eur
+            fx = ev.fx_rate or 1.0
+            all_total += ev.amount / fx
+            gross_total += (ev.gross_amount if ev.gross_amount is not None else ev.amount) / fx
+            tax_total += ((ev.foreign_tax_amount or 0.0) + (ev.tax_amount or 0.0)) / fx
             if ev.date.year == today.year:
-                ytd_total += amount_eur
+                ytd_total += ev.amount / fx
 
         # Yield on cost: sum(annual dividends per instrument) / sum(cost basis)
         avg_yield = self._avg_yield_on_cost(pids)
@@ -910,6 +914,8 @@ class DividendCalculator:
         return schemas.DividendKPIs(
             total_ytd=round(ytd_total, 2),
             total_all_time=round(all_total, 2),
+            total_gross=round(gross_total, 2),
+            total_tax=round(tax_total, 2),
             avg_yield_on_cost=round(avg_yield * 100, 2),
         )
 
@@ -1009,5 +1015,96 @@ class DividendCalculator:
                 total_cost += cost
 
         return (total_div / total_cost) if total_cost > 0 else 0.0
+
+    async def sync_from_market(self, portfolio_id: Optional[int] = None) -> int:
+        """
+        Fetch each held instrument's dividend history from Yahoo and create the
+        DividendEvents that were paid while shares were held, sized to the shares
+        held on the ex-date and taxed (estimated) gross→net. Returns how many new
+        events were created. Existing events (e.g. imported from a CSV with real
+        amounts) are preserved — the UniqueConstraint skips duplicates.
+        """
+        from .tax import compute_net
+
+        pids = _user_portfolio_ids(self.user_id, self.db, portfolio_id)
+        if not pids:
+            return 0
+
+        txs = (
+            self.db.query(Transaction)
+            .filter(Transaction.portfolio_id.in_(pids))
+            .order_by(Transaction.date)
+            .all()
+        )
+
+        # Group transactions per (portfolio, instrument)
+        by_key: Dict[Tuple[int, int], List[Transaction]] = defaultdict(list)
+        instruments: Dict[int, Instrument] = {}
+        for tx in txs:
+            by_key[(tx.portfolio_id, tx.instrument_id)].append(tx)
+            instruments[tx.instrument_id] = tx.instrument
+
+        # Fetch dividend history once per instrument (cached across portfolios)
+        history: Dict[int, List[tuple]] = {}
+        for iid, inst in instruments.items():
+            if not inst or not inst.ticker:
+                continue
+            try:
+                history[iid] = await self.market.fetch_dividend_history(inst.ticker)
+            except Exception:
+                history[iid] = []
+
+        created = 0
+        for (pid, iid), inst_txs in by_key.items():
+            inst = instruments.get(iid)
+            divs = history.get(iid) or []
+            if not inst or not divs:
+                continue
+
+            div_type = (
+                DividendType.COUPON
+                if inst.asset_class == AssetClass.BOND
+                else DividendType.DIVIDEND
+            )
+            inst_txs_sorted = sorted(inst_txs, key=lambda t: t.date)
+
+            for ex_date, per_share in divs:
+                # Shares held the day before the ex-date (a same-day buy isn't entitled)
+                qty = 0.0
+                for tx in inst_txs_sorted:
+                    if tx.date >= ex_date:
+                        break
+                    qty += tx.quantity if tx.type == TransactionType.BUY else -tx.quantity
+                if qty <= 0.0001:
+                    continue
+
+                gross = per_share * qty
+                fx = await self.market.get_fx_rate_for_date(inst.currency, ex_date)
+                bd = compute_net(gross, div_type, inst.asset_class, inst.country)
+
+                ev = DividendEvent(
+                    portfolio_id=pid,
+                    instrument_id=iid,
+                    date=ex_date,
+                    amount=round(bd.net, 4),
+                    gross_amount=round(gross, 4),
+                    foreign_tax_amount=round(bd.foreign_tax, 4),
+                    tax_amount=round(bd.italian_tax, 4),
+                    accrued_interest=0.0,
+                    currency=inst.currency,
+                    fx_rate=fx,
+                    type=div_type,
+                )
+                # Per-row savepoint: a duplicate (unique-constraint) skips just this row.
+                try:
+                    with self.db.begin_nested():
+                        self.db.add(ev)
+                        self.db.flush()
+                    created += 1
+                except Exception:
+                    pass
+
+        self.db.commit()
+        return created
 
 

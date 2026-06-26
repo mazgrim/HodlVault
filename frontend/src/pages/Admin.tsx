@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react'
 import { adminApi } from '../api'
-import { fmtDate } from '../utils/format'
+import { fmtDate, fmtDateTime } from '../utils/format'
 import { useAuth } from '../hooks/useAuth'
-import { Shield, UserCheck, UserX, Trash2, KeyRound, X } from 'lucide-react'
+import { Shield, UserCheck, UserX, Trash2, KeyRound, X, ShieldAlert, Unlock, ScrollText } from 'lucide-react'
 import { PageSpinner } from '../components/Spinner'
 import PasswordField from '../components/PasswordField'
 import { generatePassword } from '../utils/password'
 
 interface User { id: number; username: string; email: string; is_active: boolean; is_admin: boolean; created_at: string }
 interface ResetReq { id: number; user_id: number; username: string; email: string; created_at: string }
+interface LoginAttempt { id: number; identifier: string | null; ip_address: string | null; user_agent: string | null; success: boolean; blocked: boolean; created_at: string }
+interface LockoutEntry { type: 'ip' | 'identifier'; value: string; fail_count: number }
+interface SecurityStatus { max_attempts: number; lockout_minutes: number; locked: LockoutEntry[] }
 
 export default function Admin() {
   const { user: me } = useAuth()
@@ -23,6 +26,11 @@ export default function Admin() {
   const [resetDone, setResetDone] = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
 
+  // Access log / lockout
+  const [attempts, setAttempts] = useState<LoginAttempt[]>([])
+  const [security, setSecurity] = useState<SecurityStatus | null>(null)
+  const [onlyFailed, setOnlyFailed] = useState(false)
+
   const load = async () => {
     setLoading(true)
     try {
@@ -32,7 +40,28 @@ export default function Admin() {
     } finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  const loadSecurity = async (failedOnly = onlyFailed) => {
+    const [a, s] = await Promise.all([
+      adminApi.loginAttempts({ limit: 100, only_failed: failedOnly }),
+      adminApi.securityStatus(),
+    ])
+    setAttempts(a.data)
+    setSecurity(s.data)
+  }
+
+  useEffect(() => { load(); loadSecurity() }, [])
+
+  const toggleOnlyFailed = async () => {
+    const next = !onlyFailed
+    setOnlyFailed(next)
+    const a = await adminApi.loginAttempts({ limit: 100, only_failed: next })
+    setAttempts(a.data)
+  }
+
+  const unlock = async (entry: LockoutEntry) => {
+    await adminApi.clearLockout(entry.type === 'ip' ? { ip_address: entry.value } : { identifier: entry.value })
+    loadSecurity()
+  }
 
   const openReset = (id: number, username: string) => {
     setResetUser({ id, username }); setNewPw(''); setResetErr(''); setResetDone(false)
@@ -177,6 +206,89 @@ export default function Admin() {
           </div>
         </div>
       )}
+
+      {/* ── Sicurezza accessi ─────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 pt-2">
+        <ScrollText size={20} className="text-gold-500" />
+        <h2 className="text-xl font-bold text-gray-100">Sicurezza accessi</h2>
+      </div>
+
+      {security && security.locked.length > 0 && (
+        <div className="card border-red-500/40">
+          <div className="flex items-center gap-2 mb-3">
+            <ShieldAlert size={16} className="text-red-400" />
+            <h3 className="text-sm font-semibold text-gray-200">
+              Blocchi attivi ({security.locked.length})
+            </h3>
+          </div>
+          <p className="text-xs text-gray-500 mb-3">
+            Bloccati dopo {security.max_attempts} tentativi falliti; lo sblocco è automatico dopo {security.lockout_minutes} minuti senza nuovi tentativi.
+          </p>
+          <div className="space-y-2">
+            {security.locked.map((l) => (
+              <div key={`${l.type}:${l.value}`} className="flex items-center justify-between gap-3 text-sm bg-navy-900/40 rounded-lg px-3 py-2">
+                <div className="min-w-0">
+                  <span className={l.type === 'ip' ? 'badge-red' : 'badge-gold'}>
+                    {l.type === 'ip' ? 'IP' : 'Account'}
+                  </span>
+                  <span className="font-mono text-gray-100 ml-2 break-all">{l.value}</span>
+                  <span className="text-gray-600 text-xs ml-2">{l.fail_count} tentativi falliti</span>
+                </div>
+                <button
+                  onClick={() => unlock(l)}
+                  className="flex-shrink-0 flex items-center gap-1 px-3 py-1 rounded-lg bg-gold-500/15 text-gold-400 hover:bg-gold-500/25 text-xs font-medium transition-colors"
+                >
+                  <Unlock size={13} /> Sblocca
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-200">Registro accessi (ultimi 100)</h3>
+          <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
+            <input type="checkbox" checked={onlyFailed} onChange={toggleOnlyFailed} className="accent-gold-500" />
+            Solo falliti
+          </label>
+        </div>
+        {attempts.length === 0 ? (
+          <p className="text-sm text-gray-500 py-4 text-center">Nessun tentativo di accesso registrato.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-700/50">
+                  {['Data e ora', 'Esito', 'Identificativo', 'IP', 'Dispositivo'].map((h) => (
+                    <th key={h} className="text-left py-2 pr-4 text-xs font-medium text-gray-400 uppercase">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {attempts.map((a) => (
+                  <tr key={a.id} className="table-row-hover border-b border-gray-700/20">
+                    <td className="py-2.5 pr-4 text-gray-400 whitespace-nowrap">{fmtDateTime(a.created_at)}</td>
+                    <td className="py-2.5 pr-4">
+                      {a.success
+                        ? <span className="badge-green">OK</span>
+                        : a.blocked
+                          ? <span className="badge-red">Bloccato</span>
+                          : <span className="badge-red">Fallito</span>}
+                    </td>
+                    <td className="py-2.5 pr-4 text-gray-200 break-all">{a.identifier || <span className="text-gray-600">—</span>}</td>
+                    <td className="py-2.5 pr-4 font-mono text-gray-400 break-all">{a.ip_address || <span className="text-gray-600">—</span>}</td>
+                    <td className="py-2.5 pr-4 text-gray-500 text-xs max-w-xs truncate" title={a.user_agent || ''}>
+                      {a.user_agent || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {resetUser && (
         <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4" onClick={() => setResetUser(null)}>

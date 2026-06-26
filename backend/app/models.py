@@ -208,6 +208,21 @@ class PasswordResetRequest(Base):
     user = relationship("User", back_populates="reset_requests")
 
 
+class LoginAttempt(Base):
+    """Audit trail of every login attempt (success + failure). Powers the admin
+    access log and the brute-force lockout that protects an internet-exposed
+    instance from bots hammering /api/auth/login."""
+    __tablename__ = "login_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    identifier = Column(String(128), nullable=True, index=True)   # username/email tried
+    ip_address = Column(String(64), nullable=True, index=True)
+    user_agent = Column(String(256), nullable=True)
+    success = Column(Boolean, default=False)
+    blocked = Column(Boolean, default=False)  # rejected by lockout before checking the password
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class FxRate(Base):
     __tablename__ = "fx_rates"
 

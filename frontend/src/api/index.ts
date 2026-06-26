@@ -105,6 +105,11 @@ export const adminApi = {
   passwordRequests: () => api.get('/admin/password-requests'),
   resetPassword: (userId: number, newPassword: string) =>
     api.post(`/admin/users/${userId}/reset-password`, { new_password: newPassword }),
+  loginAttempts: (params?: { limit?: number; only_failed?: boolean }) =>
+    api.get('/admin/login-attempts', { params }),
+  securityStatus: () => api.get('/admin/security/status'),
+  clearLockout: (data: { ip_address?: string; identifier?: string }) =>
+    api.post('/admin/security/clear-lockout', data),
 }
 
 // ── Benchmark ─────────────────────────────────────────────────────────────────

@@ -137,3 +137,6 @@ Standalone financial calculators backed by `/api/tools`, organised in tabs: **In
 | `PRICE_UPDATE_HOUR` | `18` | Scheduler hour (0–23) |
 | `RISK_FREE_RATE` | `0.03` | Sharpe ratio risk-free rate |
 | `PORT` | `3000` | Frontend container exposed port (prod only) |
+| `LOGIN_MAX_ATTEMPTS` | `5` | Failed logins (per IP or account) before lockout |
+| `LOGIN_LOCKOUT_MINUTES` | `15` | Lockout window/duration for the login throttle |
+| `LOGIN_ATTEMPT_RETENTION_DAYS` | `90` | Days the login access log is kept before pruning |

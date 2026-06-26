@@ -34,6 +34,22 @@ export function fmtDate(d: string | Date): string {
   return new Intl.DateTimeFormat('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date)
 }
 
+export function fmtDateTime(d: string | Date): string {
+  // Backend timestamps are naive UTC (no timezone); tag them as UTC so they
+  // render in the user's local time instead of being read as local.
+  let date: Date
+  if (typeof d === 'string') {
+    const iso = /[zZ]|[+-]\d{2}:?\d{2}$/.test(d) ? d : `${d}Z`
+    date = new Date(iso)
+  } else {
+    date = d
+  }
+  return new Intl.DateTimeFormat('it-IT', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).format(date)
+}
+
 export function fmtMonth(yearMonth: string): string {
   // "2024-03" -> "Mar 2024"
   const [year, month] = yearMonth.split('-')

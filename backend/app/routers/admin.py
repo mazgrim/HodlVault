@@ -1,10 +1,12 @@
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from .. import models, schemas
+from .. import models, schemas, security
 from ..auth import require_admin, hash_password
 
 router = APIRouter()
@@ -93,4 +95,77 @@ def admin_reset_password(
         models.PasswordResetRequest.user_id == user_id,
         models.PasswordResetRequest.resolved == False,  # noqa: E712
     ).update({"resolved": True, "resolved_at": datetime.utcnow()})
+    db.commit()
+
+
+# ── Access log / brute-force lockout ──────────────────────────────────────────
+
+@router.get("/login-attempts", response_model=List[schemas.LoginAttemptOut])
+def list_login_attempts(
+    limit: int = Query(100, ge=1, le=500),
+    only_failed: bool = False,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(require_admin),
+):
+    """Recent login attempts (newest first) for the admin access log."""
+    q = db.query(models.LoginAttempt)
+    if only_failed:
+        q = q.filter(models.LoginAttempt.success == False)  # noqa: E712
+    return q.order_by(models.LoginAttempt.created_at.desc()).limit(limit).all()
+
+
+@router.get("/security/status", response_model=schemas.SecurityStatus)
+def security_status(
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(require_admin),
+):
+    """Currently active lockouts (IPs / accounts over the failure threshold in the
+    sliding window) plus the configured thresholds."""
+    window_start = datetime.utcnow() - timedelta(minutes=security.LOCKOUT_MINUTES)
+    failed = (
+        db.query(models.LoginAttempt)
+        .filter(
+            models.LoginAttempt.success == False,  # noqa: E712
+            models.LoginAttempt.created_at >= window_start,
+        )
+        .all()
+    )
+    by_ip = Counter(a.ip_address for a in failed if a.ip_address)
+    by_id = Counter(a.identifier for a in failed if a.identifier)
+
+    locked: List[schemas.LockoutEntry] = []
+    for ip, n in by_ip.items():
+        if n >= security.MAX_FAILED_ATTEMPTS:
+            locked.append(schemas.LockoutEntry(type="ip", value=ip, fail_count=n))
+    for ident, n in by_id.items():
+        if n >= security.MAX_FAILED_ATTEMPTS:
+            locked.append(schemas.LockoutEntry(type="identifier", value=ident, fail_count=n))
+    locked.sort(key=lambda e: e.fail_count, reverse=True)
+
+    return schemas.SecurityStatus(
+        max_attempts=security.MAX_FAILED_ATTEMPTS,
+        lockout_minutes=security.LOCKOUT_MINUTES,
+        locked=locked,
+    )
+
+
+@router.post("/security/clear-lockout", status_code=204)
+def clear_lockout(
+    payload: schemas.ClearLockout,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(require_admin),
+):
+    """Lift a lockout by deleting the recent failed attempts for an IP and/or an
+    identifier. Lets the admin unblock a legitimate user who locked themselves out."""
+    conds = []
+    if payload.ip_address:
+        conds.append(models.LoginAttempt.ip_address == payload.ip_address.strip())
+    if payload.identifier:
+        conds.append(models.LoginAttempt.identifier == payload.identifier.strip())
+    if not conds:
+        raise HTTPException(status_code=400, detail="Specificare ip_address o identifier")
+    db.query(models.LoginAttempt).filter(
+        models.LoginAttempt.success == False,  # noqa: E712
+        or_(*conds),
+    ).delete(synchronize_session=False)
     db.commit()

@@ -350,3 +350,30 @@ class BenchmarkChartResponse(BaseModel):
 class AdminUserUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
+
+
+# ── Security / access log ─────────────────────────────────────────────────────
+
+class LoginAttemptOut(BaseModel):
+    id: int
+    identifier: Optional[str]
+    ip_address: Optional[str]
+    user_agent: Optional[str]
+    success: bool
+    blocked: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+class LockoutEntry(BaseModel):
+    type: str          # "ip" | "identifier"
+    value: str
+    fail_count: int
+
+class SecurityStatus(BaseModel):
+    max_attempts: int
+    lockout_minutes: int
+    locked: List[LockoutEntry]
+
+class ClearLockout(BaseModel):
+    ip_address: Optional[str] = None
+    identifier: Optional[str] = None

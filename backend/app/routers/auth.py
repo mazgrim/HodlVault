@@ -1,12 +1,12 @@
 import os
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from jose import JWTError
 
 from ..database import get_db
-from .. import models, schemas
+from .. import models, schemas, security
 from ..auth import (
     verify_password, hash_password,
     create_access_token, create_refresh_token, decode_token,
@@ -54,14 +54,38 @@ def register(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=schemas.Token)
-def login(creds: schemas.UserLogin, db: Session = Depends(get_db)):
+def login(creds: schemas.UserLogin, request: Request, db: Session = Depends(get_db)):
+    ip = security.client_ip(request)
+    ua = request.headers.get("user-agent", "")
+    identifier = (creds.username or "").strip()
+
+    # Brute-force lockout: too many recent failures from this IP or against this
+    # account → reject without even checking the password. Protects an
+    # internet-exposed instance from bots. The block is recorded so the lockout
+    # stays effective while an attacker keeps hammering and the admin sees it.
+    if security.is_locked(db, ip, identifier):
+        security.record_attempt(db, identifier=identifier, ip=ip, user_agent=ua,
+                                success=False, blocked=True)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Troppi tentativi di accesso falliti. Attendi "
+                f"{security.LOCKOUT_MINUTES} minuti senza riprovare, oppure "
+                f"contatta l'amministratore."
+            ),
+        )
+
     # Accept either the username or the email in the same field.
-    user = _find_user_by_identifier(creds.username, db)
+    user = _find_user_by_identifier(identifier, db)
     if not user or not verify_password(creds.password, user.hashed_password):
+        security.record_attempt(db, identifier=identifier, ip=ip, user_agent=ua, success=False)
         raise HTTPException(status_code=401, detail="Credenziali non valide")
     if not user.is_active:
+        security.record_attempt(db, identifier=identifier, ip=ip, user_agent=ua, success=False)
         raise HTTPException(status_code=403, detail="Account disabilitato")
 
+    security.record_attempt(db, identifier=identifier, ip=ip, user_agent=ua, success=True)
+    security.prune_old(db)
     return schemas.Token(
         access_token=create_access_token({"sub": str(user.id)}),
         refresh_token=create_refresh_token({"sub": str(user.id)}),

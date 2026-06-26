@@ -42,6 +42,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     portfolios = relationship("Portfolio", back_populates="user", cascade="all, delete-orphan")
+    reset_requests = relationship("PasswordResetRequest", back_populates="user", cascade="all, delete-orphan")
 
 
 class Portfolio(Base):
@@ -191,6 +192,20 @@ class EtfSectorWeight(Base):
     etf_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
     sector_key = Column(String(64), nullable=False)   # canonical Yahoo key, e.g. "technology"
     weight = Column(Float, default=0.0)               # fraction (0..1)
+
+
+class PasswordResetRequest(Base):
+    """An in-app 'forgot password' request raised at login. The admin sees pending
+    requests (no email infra) and resets the password manually."""
+    __tablename__ = "password_reset_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    resolved = Column(Boolean, default=False)
+    resolved_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="reset_requests")
 
 
 class FxRate(Base):

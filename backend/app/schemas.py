@@ -32,6 +32,23 @@ class Token(BaseModel):
 class TokenRefresh(BaseModel):
     refresh_token: str
 
+class PasswordChange(BaseModel):
+    old_password: str
+    new_password: str = Field(min_length=8)
+
+class ForgotPasswordRequest(BaseModel):
+    identifier: str   # username or email
+
+class AdminPasswordReset(BaseModel):
+    new_password: str = Field(min_length=8)
+
+class PasswordResetRequestOut(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    email: str
+    created_at: datetime
+
 
 # ── Portfolio ─────────────────────────────────────────────────────────────────
 

@@ -2,23 +2,58 @@ import { useState, useEffect } from 'react'
 import { adminApi } from '../api'
 import { fmtDate } from '../utils/format'
 import { useAuth } from '../hooks/useAuth'
-import { Shield, UserCheck, UserX, Trash2 } from 'lucide-react'
+import { Shield, UserCheck, UserX, Trash2, KeyRound, X } from 'lucide-react'
 import { PageSpinner } from '../components/Spinner'
+import PasswordField from '../components/PasswordField'
+import { generatePassword } from '../utils/password'
 
 interface User { id: number; username: string; email: string; is_active: boolean; is_admin: boolean; created_at: string }
+interface ResetReq { id: number; user_id: number; username: string; email: string; created_at: string }
 
 export default function Admin() {
   const { user: me } = useAuth()
   const [users, setUsers] = useState<User[]>([])
+  const [requests, setRequests] = useState<ResetReq[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Reset-password modal
+  const [resetUser, setResetUser] = useState<{ id: number; username: string } | null>(null)
+  const [newPw, setNewPw] = useState('')
+  const [resetErr, setResetErr] = useState('')
+  const [resetDone, setResetDone] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
 
   const load = async () => {
     setLoading(true)
-    try { const r = await adminApi.users(); setUsers(r.data) }
-    finally { setLoading(false) }
+    try {
+      const [u, r] = await Promise.all([adminApi.users(), adminApi.passwordRequests()])
+      setUsers(u.data)
+      setRequests(r.data)
+    } finally { setLoading(false) }
   }
 
   useEffect(() => { load() }, [])
+
+  const openReset = (id: number, username: string) => {
+    setResetUser({ id, username }); setNewPw(''); setResetErr(''); setResetDone(false)
+  }
+
+  const submitReset = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setResetErr('')
+    if (newPw.length < 8) { setResetErr('La password deve avere almeno 8 caratteri.'); return }
+    if (!resetUser) return
+    setResetLoading(true)
+    try {
+      await adminApi.resetPassword(resetUser.id, newPw)
+      setResetDone(true)
+      load()
+    } catch (err: any) {
+      setResetErr(err.response?.data?.detail || 'Errore durante il reset.')
+    } finally {
+      setResetLoading(false)
+    }
+  }
 
   if (!me?.is_admin) return (
     <div className="flex items-center justify-center h-64">
@@ -43,6 +78,34 @@ export default function Admin() {
         <Shield size={22} className="text-gold-500" />
         <h1 className="text-2xl font-bold text-gray-100">Amministrazione Utenti</h1>
       </div>
+
+      {!loading && requests.length > 0 && (
+        <div className="card border-red-500/30">
+          <div className="flex items-center gap-2 mb-3">
+            <KeyRound size={16} className="text-red-400" />
+            <h2 className="text-sm font-semibold text-gray-200">
+              Richieste di reset password ({requests.length})
+            </h2>
+          </div>
+          <div className="space-y-2">
+            {requests.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-3 text-sm bg-navy-900/40 rounded-lg px-3 py-2">
+                <div className="min-w-0">
+                  <span className="font-medium text-gray-100">{r.username}</span>
+                  <span className="text-gray-500"> · {r.email}</span>
+                  <span className="text-gray-600 text-xs ml-2">{fmtDate(r.created_at)}</span>
+                </div>
+                <button
+                  onClick={() => openReset(r.user_id, r.username)}
+                  className="flex-shrink-0 px-3 py-1 rounded-lg bg-gold-500/15 text-gold-400 hover:bg-gold-500/25 text-xs font-medium transition-colors"
+                >
+                  Reset password
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading ? <PageSpinner /> : (
         <div className="card">
@@ -91,6 +154,13 @@ export default function Admin() {
                             <Shield size={15} />
                           </button>
                           <button
+                            onClick={() => openReset(u.id, u.username)}
+                            title="Reset password"
+                            className="p-1.5 rounded hover:bg-navy-700 text-gray-400 hover:text-gold-500 transition-colors"
+                          >
+                            <KeyRound size={15} />
+                          </button>
+                          <button
                             onClick={() => del(u.id)}
                             title="Elimina utente"
                             className="p-1.5 rounded hover:bg-red-900/30 text-gray-400 hover:text-red-400 transition-colors"
@@ -104,6 +174,50 @@ export default function Admin() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {resetUser && (
+        <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4" onClick={() => setResetUser(null)}>
+          <div className="card border-gray-700/60 w-full max-w-sm relative" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setResetUser(null)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-300">
+              <X size={18} />
+            </button>
+            <h2 className="text-base font-semibold text-gray-200 mb-1">Reset password</h2>
+            <p className="text-xs text-gray-500 mb-4">
+              Imposta una password temporanea per <span className="text-gray-300 font-medium">{resetUser.username}</span> e comunicagliela di persona. Potrà cambiarla dopo il login.
+            </p>
+
+            {resetDone ? (
+              <div className="space-y-4">
+                <div className="text-emerald-400 text-sm bg-emerald-900/20 border border-emerald-700/30 rounded-lg px-3 py-2">
+                  Password reimpostata per {resetUser.username}.
+                </div>
+                <button onClick={() => setResetUser(null)} className="btn-primary w-full">Chiudi</button>
+              </div>
+            ) : (
+              <form onSubmit={submitReset} className="space-y-4">
+                <div>
+                  <label className="label">Password temporanea</label>
+                  <PasswordField
+                    value={newPw}
+                    onChange={setNewPw}
+                    required
+                    autoFocus
+                    defaultVisible
+                    onGenerate={() => setNewPw(generatePassword())}
+                  />
+                  <p className="text-xs text-gray-600 mt-1">Almeno 8 caratteri.</p>
+                </div>
+                {resetErr && (
+                  <div className="text-red-400 text-sm bg-red-900/20 border border-red-700/30 rounded-lg px-3 py-2">{resetErr}</div>
+                )}
+                <button type="submit" disabled={resetLoading} className="btn-primary w-full">
+                  {resetLoading ? 'Salvataggio...' : 'Imposta password'}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

@@ -4,11 +4,12 @@ import {
   LayoutDashboard, TrendingUp, PieChart, Landmark,
   Upload, Wrench, LogOut, ChevronLeft, ChevronRight,
   Users, RefreshCw, History, Menu, ArrowLeftRight, BarChart2,
-  Sun, Moon,
+  Sun, Moon, KeyRound, User, ChevronUp, ChevronDown,
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
-import { marketApi } from '../api'
+import { marketApi, adminApi } from '../api'
+import ChangePasswordModal from './ChangePasswordModal'
 
 const NAV = [
   { to: '/',              icon: LayoutDashboard, label: 'Dashboard' },
@@ -32,6 +33,30 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [showChangePw, setShowChangePw] = useState(false)
+  const [pendingResets, setPendingResets] = useState(0)
+  const [accountOpen, setAccountOpen] = useState(false)
+
+  // Close the account menu when clicking outside it. Uses a data-attribute lookup
+  // (not a ref) because the sidebar markup is rendered twice (desktop + mobile):
+  // a single ref would point at the wrong instance and dismiss the menu on mousedown
+  // before the item's click could fire — leaving the menu closed but the action lost.
+  useEffect(() => {
+    if (!accountOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-account-menu]')) setAccountOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [accountOpen])
+
+  // Admin notification: count of pending password-reset requests for the badge.
+  useEffect(() => {
+    if (!user?.is_admin) { setPendingResets(0); return }
+    adminApi.passwordRequests()
+      .then((r) => setPendingResets(r.data.length))
+      .catch(() => {})
+  }, [user?.is_admin])
 
   // Foreground progress bar + percentage badge for the market-data actions, so the
   // user sees that something is happening even when the request is near-instant.
@@ -115,22 +140,6 @@ export default function Layout({ children }: LayoutProps) {
             {!collapsed && <span>{label}</span>}
           </NavLink>
         ))}
-        {user?.is_admin && (
-          <NavLink
-            to="/admin"
-            onClick={() => setMobileOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-                isActive
-                  ? 'bg-gold-500/15 text-gold-500 border border-gold-500/25'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-navy-700/60'
-              } ${collapsed ? 'justify-center' : ''}`
-            }
-          >
-            <Users size={18} className="flex-shrink-0" />
-            {!collapsed && <span>Admin</span>}
-          </NavLink>
-        )}
       </nav>
 
       {/* Bottom actions */}
@@ -153,21 +162,90 @@ export default function Layout({ children }: LayoutProps) {
           <History size={18} className={`flex-shrink-0 ${loadingHistory ? 'animate-pulse text-gold-500' : ''}`} />
           {!collapsed && <span>{loadingHistory ? 'Caricamento...' : 'Carica storico'}</span>}
         </button>
-        <button
-          onClick={toggleTheme}
-          title={theme === 'dark' ? 'Passa al tema chiaro' : 'Passa al tema scuro'}
-          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-gold-400 hover:bg-navy-700/60 transition-all w-full ${collapsed ? 'justify-center' : ''}`}
-        >
-          {theme === 'dark' ? <Sun size={18} className="flex-shrink-0" /> : <Moon size={18} className="flex-shrink-0" />}
-          {!collapsed && <span>{theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}</span>}
-        </button>
-        <button
-          onClick={logout}
-          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-all w-full ${collapsed ? 'justify-center' : ''}`}
-        >
-          <LogOut size={18} className="flex-shrink-0" />
-          {!collapsed && <span>Esci ({user?.username})</span>}
-        </button>
+        {collapsed ? (
+          <>
+            {user?.is_admin && (
+              <NavLink
+                to="/admin" onClick={() => setMobileOpen(false)} title="Amministrazione"
+                className={({ isActive }) =>
+                  `relative flex items-center justify-center px-3 py-2.5 rounded-lg transition-all w-full ${
+                    isActive ? 'bg-gold-500/15 text-gold-500' : 'text-gray-400 hover:text-gold-400 hover:bg-navy-700/60'
+                  }`
+                }
+              >
+                <Users size={18} />
+                {pendingResets > 0 && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />}
+              </NavLink>
+            )}
+            {!isDemo && (
+              <button onClick={() => setShowChangePw(true)} title="Cambia password"
+                className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-gold-400 hover:bg-navy-700/60 transition-all w-full">
+                <KeyRound size={18} />
+              </button>
+            )}
+            <button onClick={toggleTheme} title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
+              className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-gold-400 hover:bg-navy-700/60 transition-all w-full">
+              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button onClick={logout} title="Esci"
+              className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-all w-full">
+              <LogOut size={18} />
+            </button>
+          </>
+        ) : (
+          <div className="relative" data-account-menu>
+            {accountOpen && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg bg-navy-700 border border-gray-700/60 shadow-xl py-1 z-20">
+                {user?.is_admin && (
+                  <NavLink
+                    to="/admin" onClick={() => { setAccountOpen(false); setMobileOpen(false) }}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2 text-sm w-full transition-colors ${
+                        isActive ? 'text-gold-500' : 'text-gray-300 hover:text-gold-400 hover:bg-navy-600/60'
+                      }`
+                    }
+                  >
+                    <Users size={16} className="flex-shrink-0" />
+                    <span>Admin</span>
+                    {pendingResets > 0 && (
+                      <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                        {pendingResets}
+                      </span>
+                    )}
+                  </NavLink>
+                )}
+                {!isDemo && (
+                  <button onClick={() => { setAccountOpen(false); setShowChangePw(true) }}
+                    className="flex items-center gap-3 px-3 py-2 text-sm w-full text-gray-300 hover:text-gold-400 hover:bg-navy-600/60 transition-colors">
+                    <KeyRound size={16} className="flex-shrink-0" />
+                    <span>Cambia password</span>
+                  </button>
+                )}
+                <button onClick={() => { setAccountOpen(false); toggleTheme() }}
+                  className="flex items-center gap-3 px-3 py-2 text-sm w-full text-gray-300 hover:text-gold-400 hover:bg-navy-600/60 transition-colors">
+                  {theme === 'dark' ? <Sun size={16} className="flex-shrink-0" /> : <Moon size={16} className="flex-shrink-0" />}
+                  <span>{theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}</span>
+                </button>
+                <button onClick={() => { setAccountOpen(false); logout() }}
+                  className="flex items-center gap-3 px-3 py-2 text-sm w-full text-gray-300 hover:text-red-400 hover:bg-red-900/20 transition-colors">
+                  <LogOut size={16} className="flex-shrink-0" />
+                  <span>Esci</span>
+                </button>
+              </div>
+            )}
+            <button onClick={() => setAccountOpen((o) => !o)}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-300 hover:bg-navy-700/60 transition-all w-full">
+              <User size={18} className="flex-shrink-0" />
+              <span className="truncate flex-1 text-left">{user?.username}</span>
+              {pendingResets > 0 && !accountOpen && (
+                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex-shrink-0">
+                  {pendingResets}
+                </span>
+              )}
+              {accountOpen ? <ChevronUp size={16} className="flex-shrink-0" /> : <ChevronDown size={16} className="flex-shrink-0" />}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Collapse toggle (desktop) */}
@@ -182,6 +260,8 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="flex h-screen bg-navy-900 overflow-hidden">
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
+
       {/* Foreground progress bar + percentage badge for market-data actions */}
       {barVisible && (
         <>

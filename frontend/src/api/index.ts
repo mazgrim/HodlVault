@@ -9,6 +9,10 @@ export const authApi = {
   me: () => api.get('/auth/me'),
   refresh: (refresh_token: string) =>
     api.post('/auth/refresh', { refresh_token }),
+  changePassword: (old_password: string, new_password: string) =>
+    api.post('/auth/change-password', { old_password, new_password }),
+  forgotPassword: (identifier: string) =>
+    api.post('/auth/forgot-password', { identifier }),
 }
 
 // ── Portfolios ────────────────────────────────────────────────────────────────
@@ -98,6 +102,9 @@ export const adminApi = {
   users: () => api.get('/admin/users'),
   updateUser: (id: number, data: object) => api.patch(`/admin/users/${id}`, data),
   deleteUser: (id: number) => api.delete(`/admin/users/${id}`),
+  passwordRequests: () => api.get('/admin/password-requests'),
+  resetPassword: (userId: number, newPassword: string) =>
+    api.post(`/admin/users/${userId}/reset-password`, { new_password: newPassword }),
 }
 
 // ── Benchmark ─────────────────────────────────────────────────────────────────

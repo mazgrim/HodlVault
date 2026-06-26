@@ -1,6 +1,10 @@
-# HodlVault — Self-hosted Portfolio Tracker
+# HodlVault — Portfolio Tracker self-hosted
 
-Finance portfolio tracker personale con supporto multi-utente, dark mode, e integrazione Yahoo Finance.
+Tracker di investimenti personale, self-hosted, in EUR. Tieni traccia di azioni,
+ETF, obbligazioni e crypto in un'unica dashboard, con prezzi aggiornati
+automaticamente da Yahoo Finance. Multi-utente, dark mode, import da broker.
+
+> Uso privato. Pensato per poche persone (~10 utenti), non per servizio pubblico.
 
 ---
 
@@ -11,60 +15,70 @@ Finance portfolio tracker personale con supporto multi-utente, dark mode, e inte
 | Backend | FastAPI + SQLAlchemy + SQLite |
 | Frontend | React 18 + Vite + TailwindCSS + Recharts |
 | Auth | JWT (access + refresh token) |
-| Dati mercato | yfinance (Yahoo Finance, gratuito) |
+| Dati di mercato | API Yahoo Finance (chiamate dirette via `httpx`) |
 | Deploy | Docker + Docker Compose |
 
 ---
 
 ## Funzionalità
 
-- **Dashboard** — KPI (valore, P&L, TWR), grafico valore nel tempo, tabella posizioni
-- **Performance** — Rendimento cumulativo, heatmap mensile, drawdown, Sharpe ratio
-- **Analisi** — Allocazione per asset class/settore/paese/valuta, concentration risk (HHI)
-- **Dividendi** — Storico incassi, proiezione 12 mesi, yield-on-cost
-- **Import** — CSV Fineco, Directa SIM, Trade Republic con preview e dedup
-- **Tools** — Interesse composto, FIRE calculator, PAC vs Lump Sum, inflazione
-- **Admin** — Gestione utenti (abilitazione, promozione admin)
+- **Dashboard** — valore totale, P&L realizzato/non realizzato, rendimento TWR, grafico nel tempo e tabella posizioni.
+- **Performance** — rendimento cumulativo, heatmap dei rendimenti mensili, drawdown, Sharpe ratio, volatilità.
+- **Analisi** — allocazione per asset class, settore, paese e valuta; rischio di concentrazione (HHI), con *look-through* dentro gli ETF.
+- **Dividendi** — storico incassi, proiezione a 12 mesi, yield-on-cost.
+- **Benchmark** — confronta il tuo portafoglio con indici di mercato (es. MSCI World).
+- **Import CSV** — Fineco, Directa SIM, Trade Republic, con anteprima e dedup automatica.
+- **Strumenti** — calcolatori di interesse composto, FIRE, PAC vs Lump Sum, inflazione (tutto lato client).
+- **Multi-utente & Admin** — gestione utenti, reset password, registro accessi e blocco automatico dopo troppi tentativi falliti (protezione anti brute-force).
+- **Modalità demo** — login senza password con dati di esempio, in sola lettura.
 
 ---
 
-## Sviluppo locale (Windows + Docker Desktop)
+## Avvio rapido (Docker)
 
-### Prerequisiti
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) con WSL2 abilitato
-
-### Setup
+Serve solo [Docker Desktop](https://www.docker.com/products/docker-desktop/) (o Docker Engine).
 
 ```bash
-# Clona il repo
-git clone <repo-url>
-cd HodlVault
+git clone <repo-url> && cd HodlVault
 
-# Copia e personalizza le variabili d'ambiente
-copy .env.example .env
-# Modifica .env: almeno SECRET_KEY deve essere cambiato
+# 1. Crea il file di configurazione
+cp .env.example .env      # su Windows: copy .env.example .env
 
-# Avvia in modalità sviluppo (hot reload frontend e backend)
+# 2. Apri .env e imposta una SECRET_KEY lunga e casuale (almeno 32 caratteri)
+#    Per generarla: openssl rand -hex 32
+
+# 3. Avvia
 docker compose -f docker-compose.dev.yml up
-
-# Frontend: http://localhost:5173
-# Backend API: http://localhost:8000
-# Swagger docs: http://localhost:8000/docs
 ```
 
-### Sviluppo senza Docker (più veloce)
+Pronto:
 
-**Backend:**
+| Cosa | URL |
+|---|---|
+| App (frontend) | http://localhost:5173 |
+| API (backend) | http://localhost:8000 |
+| Documentazione API (Swagger) | http://localhost:8000/docs |
+
+Il **primo account che registri diventa automaticamente admin**.
+
+In modalità sviluppo frontend e backend hanno l'hot-reload: salvi un file e l'app si aggiorna da sola.
+
+---
+
+## Sviluppo senza Docker
+
+Più veloce se hai già Python e Node installati. Servono **due terminali**.
+
+**Backend** (Python 3.12+):
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate        # Linux/Mac: source .venv/bin/activate
 pip install -r requirements.txt
-mkdir -p data
 uvicorn app.main:app --reload --port 8000
 ```
 
-**Frontend (nuova finestra):**
+**Frontend** (Node 20+):
 ```bash
 cd frontend
 npm install
@@ -73,101 +87,88 @@ npm run dev
 
 ---
 
-## Deploy su Linux Server
-
-### Prerequisiti
-- Linux (Ubuntu 22.04+ raccomandato)
-- Docker Engine + Docker Compose v2
-- Porta 3000 (o quella configurata) aperta nel firewall
-
-### Deploy
+## Deploy in produzione
 
 ```bash
-# Trasferisci i file sul server (es. via scp o git)
-git clone <repo-url> /opt/hodlvault
-cd /opt/hodlvault
+git clone <repo-url> /opt/hodlvault && cd /opt/hodlvault
 
-# Configura .env
 cp .env.example .env
 nano .env
-# IMPORTANTE: cambia SECRET_KEY con una stringa random lunga
-# Esempio generazione: openssl rand -hex 32
+#  - SECRET_KEY: stringa casuale (openssl rand -hex 32)
+#  - APP_ENV=production   (l'app si rifiuta di partire con una SECRET_KEY debole)
+#  - CORS_ORIGINS: l'URL pubblico dell'app
 
-# Build e avvio
 docker compose up -d --build
-
-# Verifica
-docker compose ps
-docker compose logs -f
 ```
 
-### Accesso
-L'app sarà disponibile su `http://<ip-server>:3000`
+L'app è su `http://<ip-server>:3000` (cambia la porta con `PORT` nel `.env`).
 
-**Primo avvio:** registra un account — il primo utente diventa automaticamente admin.
+**Aggiornare** all'ultima versione:
+```bash
+cd /opt/hodlvault && git pull && docker compose up -d --build
+```
 
-### Con Nginx come reverse proxy (opzionale)
+**Backup del database** (SQLite nel volume `hodlvault_hodlvault_data`):
+```bash
+docker run --rm -v hodlvault_hodlvault_data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/hodlvault-backup-$(date +%Y%m%d).tar.gz /data
+```
+
+<details>
+<summary><b>Reverse proxy con Nginx + HTTPS (opzionale)</b></summary>
 
 ```nginx
 server {
     listen 80;
     server_name hodlvault.tuodominio.it;
-
     location / {
         proxy_pass http://localhost:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 ```
 
-Con HTTPS via certbot:
+Poi abilita HTTPS con certbot:
 ```bash
 sudo certbot --nginx -d hodlvault.tuodominio.it
 ```
 
-### Aggiornamenti
-
-```bash
-cd /opt/hodlvault
-git pull
-docker compose up -d --build
-```
-
-### Backup database
-
-```bash
-# Il database SQLite è nel volume Docker "hodlvault_hodlvault_data"
-# Per farne backup:
-docker run --rm -v hodlvault_hodlvault_data:/data -v $(pwd):/backup alpine \
-  tar czf /backup/hodlvault-backup-$(date +%Y%m%d).tar.gz /data
-```
+> `X-Forwarded-For` è necessario perché il registro accessi e il blocco
+> anti brute-force vedano l'IP reale dei client, non quello del proxy.
+</details>
 
 ---
 
-## Configurazione (.env)
+## Configurazione (`.env`)
 
 | Variabile | Default | Descrizione |
 |---|---|---|
-| `SECRET_KEY` | — | **Obbligatorio** — chiave JWT, minimo 32 caratteri random |
-| `REGISTRATION_OPEN` | `true` | `false` = solo l'admin può creare utenti |
+| `SECRET_KEY` | — | **Obbligatoria** — chiave JWT, almeno 32 caratteri casuali |
+| `APP_ENV` | `development` | `production` blocca l'avvio se la `SECRET_KEY` è debole |
+| `REGISTRATION_OPEN` | `true` | `false` = nessuna registrazione (solo admin crea utenti) |
 | `DEFAULT_CURRENCY` | `EUR` | Valuta di visualizzazione |
-| `PRICE_UPDATE_HOUR` | `18` | Ora aggiornamento automatico prezzi (0-23) |
-| `RISK_FREE_RATE` | `0.03` | Tasso risk-free per Sharpe ratio (es. 0.03 = 3%) |
-| `PORT` | `3000` | Porta esposta del container frontend |
+| `PRICE_UPDATE_HOUR` | `18` | Ora dell'aggiornamento automatico prezzi (0–23) |
+| `RISK_FREE_RATE` | `0.03` | Tasso risk-free per lo Sharpe ratio (0.03 = 3%) |
+| `CORS_ORIGINS` | `*` | Origini permesse; impostala all'URL pubblico in produzione |
+| `LOGIN_MAX_ATTEMPTS` | `5` | Tentativi falliti (per IP o account) prima del blocco |
+| `LOGIN_LOCKOUT_MINUTES` | `15` | Durata del blocco / finestra di conteggio |
+| `PORT` | `3000` | Porta pubblica del container frontend (solo produzione) |
+
+Le variabili meno comuni (durata dei token, `DATABASE_URL`, retention del registro accessi) sono documentate in `.env.example`.
 
 ---
 
 ## Import CSV
 
-### Fineco
-Esporta il CSV movimenti da **MyFineco → Titoli → Movimenti**. Il file usa separatore `;` e encoding UTF-8 con BOM.
+| Broker | Dove esportare il CSV |
+|---|---|
+| **Fineco** | MyFineco → Titoli → Movimenti (separatore `;`, UTF-8 con BOM) |
+| **Directa SIM** | Piattaforma Directa → Rendiconto → Movimenti titoli |
+| **Trade Republic** | Impostazioni → Documenti → Estratto conto titoli (CSV) |
 
-### Directa SIM
-Esporta il CSV da **Piattaforma Directa → Rendiconto → Movimenti titoli**.
-
-### Trade Republic
-Esporta il CSV da **Impostazioni → Documenti → Estratto conto titoli** (formato CSV).
+Carica il file dalla sezione **Importa**: vedrai un'anteprima delle operazioni e le righe già presenti verranno scartate automaticamente.
 
 ---
 
@@ -176,25 +177,27 @@ Esporta il CSV da **Impostazioni → Documenti → Estratto conto titoli** (form
 ```
 HodlVault/
 ├── backend/
-│   ├── app/
-│   │   ├── main.py          # FastAPI app + scheduler
-│   │   ├── models.py        # SQLAlchemy models
-│   │   ├── schemas.py       # Pydantic schemas
-│   │   ├── auth.py          # JWT auth
-│   │   ├── database.py      # DB setup
-│   │   ├── routers/         # API endpoints
-│   │   └── services/        # Business logic + parsers
-│   └── Dockerfile
+│   └── app/
+│       ├── main.py        # FastAPI app, CORS, scheduler prezzi
+│       ├── models.py      # Tabelle SQLAlchemy
+│       ├── schemas.py     # Schemi Pydantic (request/response)
+│       ├── auth.py        # JWT, permessi (admin / scrittura)
+│       ├── security.py    # Blocco login anti brute-force
+│       ├── database.py    # Engine + sessione SQLite
+│       ├── routers/       # Un file per area API (auth, portfolios, …)
+│       └── services/
+│           ├── calculations.py  # Dashboard, performance, dividendi
+│           ├── market.py        # Prezzi e tassi di cambio (Yahoo)
+│           └── parsers/         # Importatori CSV per broker
 ├── frontend/
-│   ├── src/
-│   │   ├── pages/           # Dashboard, Performance, etc.
-│   │   ├── components/      # KpiCard, Layout, etc.
-│   │   ├── api/             # REST client
-│   │   ├── hooks/           # useAuth, usePortfolios
-│   │   └── utils/format.ts  # Formattazione italiana
-│   └── Dockerfile
-├── docker-compose.yml
-├── docker-compose.dev.yml
+│   └── src/
+│       ├── pages/         # Una pagina per schermata (Dashboard, Analisi, …)
+│       ├── components/    # UI riutilizzabile (KpiCard, Layout, modali)
+│       ├── api/           # Client REST tipizzato
+│       ├── context/       # Stato condiviso (auth, portafogli)
+│       └── utils/         # Formattazione in locale italiano
+├── docker-compose.yml      # Produzione
+├── docker-compose.dev.yml  # Sviluppo (hot-reload)
 └── .env.example
 ```
 
@@ -202,7 +205,8 @@ HodlVault/
 
 ## Note tecniche
 
-- I prezzi vengono aggiornati automaticamente ogni giorno all'ora configurata (default 18:00)
-- Tutti i valori sono convertiti in EUR usando i tassi di cambio da Yahoo Finance
-- Il database SQLite è ottimizzato per max ~10 utenti e ~10.000 transazioni
-- Il bottone "Aggiorna prezzi" nella sidebar forza un refresh immediato in background
+- **Prezzi**: aggiornati ogni giorno all'ora configurata (default 18:00) tramite uno scheduler interno. Il pulsante *"Aggiorna prezzi"* nella sidebar forza un refresh immediato.
+- **Valuta**: tutto è convertito in EUR usando l'ultimo tasso di cambio salvato da Yahoo Finance.
+- **Database**: SQLite, in un volume Docker. Le tabelle vengono create all'avvio; non ci sono migrazioni automatiche, quindi un cambio di schema può richiedere un reset del DB.
+- **Sicurezza**: i token JWT (access + refresh) sono salvati nel browser; il login ha un blocco automatico dopo troppi tentativi falliti e un registro accessi consultabile dall'admin.
+- **Dimensionamento**: ottimizzato per uso personale (~10 utenti, ~10.000 transazioni).

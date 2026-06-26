@@ -3,6 +3,13 @@ from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from .models import TransactionType, DividendType, AssetClass
 
+# Alias to the date type. Some models have a field literally named `date`; an
+# annotated assignment like `date: Optional[date] = None` rebinds `date` to the
+# default in the class namespace *before* the annotation is evaluated, so the
+# annotation would resolve to NoneType and reject every real date. Referencing
+# the type through this alias sidesteps the shadowing.
+_Date = date
+
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -125,7 +132,7 @@ class TransactionOut(BaseModel):
 
 class TransactionUpdate(BaseModel):
     type: Optional[TransactionType] = None
-    date: Optional[date] = None
+    date: Optional[_Date] = None
     quantity: Optional[float] = Field(default=None, gt=0)
     price: Optional[float] = Field(default=None, ge=0)
     fees: Optional[float] = Field(default=None, ge=0)

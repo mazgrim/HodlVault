@@ -197,7 +197,8 @@ export default function Dividends() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <KpiCard title="Totale Netto (storico)" value={fmtEur(kpis?.total_all_time ?? 0)} icon={<Landmark size={16} />} gold />
             <KpiCard title="Totale Lordo"            value={fmtEur(kpis?.total_gross ?? 0)}    icon={<TrendingUp size={16} />} />
-            <KpiCard title="Totale Tasse"            value={fmtEur(kpis?.total_tax ?? 0)}      icon={<Receipt size={16} />} />
+            <KpiCard title="Totale Tasse"            value={fmtEur(kpis?.total_tax ?? 0)}      icon={<Receipt size={16} />}
+              info="Stima della tassazione, regime «netto frontiera»: prima la ritenuta estera alla fonte, poi l'imposta sostitutiva italiana sulla parte restante. Aliquote italiane: 26% su dividendi di azioni ed ETF, 12,5% su cedole e titoli di Stato white-list. Ritenuta estera stimata per Paese (es. USA 15%, Germania 26,4%, Svizzera 35%; ETF UCITS irlandesi/lussemburghesi e UK 0%). Sono stime: le aliquote effettive (convenzioni contro le doppie imposizioni, modulo W-8BEN) possono variare. Per gli import CSV con la ritenuta reale del broker viene usata quella." />
             <KpiCard title="Netto YTD"               value={fmtEur(kpis?.total_ytd ?? 0)}      icon={<Calendar size={16} />} />
             <KpiCard title="Yield on Cost Medio"     value={fmtPct(kpis?.avg_yield_on_cost ?? 0)} icon={<Calendar size={16} />} />
           </div>

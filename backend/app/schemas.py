@@ -242,6 +242,10 @@ class PortfolioChartPoint(BaseModel):
 
 class PortfolioChartResponse(BaseModel):
     points: List[PortfolioChartPoint]
+    # Variazione di mercato sul periodo mostrato (EUR e %, al netto di
+    # versamenti/prelievi nella finestra). None quando i punti sono < 2.
+    change: Optional[float] = None
+    change_pct: Optional[float] = None
 
 
 # ── Performance ───────────────────────────────────────────────────────────────

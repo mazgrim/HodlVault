@@ -226,6 +226,28 @@ class DashboardCalculator:
             as_of_date=date.today(),
         )
 
+    def _net_flow_eur(self, pids: List[int], after: date, through: date) -> float:
+        """Net cash invested (buys cost − sells proceeds, in EUR) for transactions
+        dated in (after, through]. Used to strip contributions out of a value change."""
+        txs = (
+            self.db.query(Transaction)
+            .filter(
+                Transaction.portfolio_id.in_(pids),
+                Transaction.date > after,
+                Transaction.date <= through,
+            )
+            .all()
+        )
+        flow = 0.0
+        for tx in txs:
+            price_eur = tx.price / tx.fx_rate if tx.fx_rate else tx.price
+            fees_eur = tx.fees / tx.fx_rate if tx.fx_rate else tx.fees
+            if tx.type == TransactionType.BUY:
+                flow += price_eur * tx.quantity + fees_eur
+            else:
+                flow -= price_eur * tx.quantity - fees_eur
+        return flow
+
     def _annualized_twr(self, portfolio_id: Optional[int], age_days: int) -> Optional[float]:
         """Annualised geometric TWR over the full history, or None when there isn't
         enough history (< ~90 days) to annualise meaningfully."""
@@ -345,7 +367,16 @@ class DashboardCalculator:
 
             points.append(schemas.PortfolioChartPoint(date=chart_date, value=round(total, 2)))
 
-        return schemas.PortfolioChartResponse(points=points)
+        # Market change over the shown window: last vs first value, with cash flows
+        # inside the window netted out so a contribution isn't read as a gain.
+        change = change_pct = None
+        if len(points) >= 2:
+            first, last = points[0], points[-1]
+            flow = self._net_flow_eur(pids, first.date, last.date)
+            change = round((last.value - first.value) - flow, 2)
+            change_pct = round(change / first.value * 100, 2) if first.value else None
+
+        return schemas.PortfolioChartResponse(points=points, change=change, change_pct=change_pct)
 
     def analysis(self, portfolio_id: Optional[int] = None) -> schemas.AnalysisResponse:
         positions = self.open_positions(portfolio_id)

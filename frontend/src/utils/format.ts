@@ -17,6 +17,19 @@ export function fmtPct(value: number, plusSign = false): string {
   return plusSign && value > 0 ? `+${s}` : s
 }
 
+/**
+ * Compact EUR label for chart Y-axis ticks. Avoids repeated labels on narrow
+ * value ranges: small/medium amounts are shown in full with a thousands
+ * separator (€ 7.247) so adjacent ticks stay distinct, while large amounts
+ * collapse to k / M. No decimals — ticks read cleanly.
+ */
+export function fmtAxisEur(value: number): string {
+  const a = Math.abs(value)
+  if (a >= 1_000_000) return `€${(value / 1_000_000).toFixed(1).replace('.', ',')}M`
+  if (a >= 100_000)   return `€${Math.round(value / 1000)}k`
+  return `€${IT_INT.format(value)}`
+}
+
 export function fmtNum(value: number, decimals = 2): string {
   return new Intl.NumberFormat('it-IT', {
     minimumFractionDigits: decimals,
@@ -48,6 +61,12 @@ export function fmtDateTime(d: string | Date): string {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   }).format(date)
+}
+
+export function fmtTime(d: string | Date): string {
+  // Intraday timestamps arrive as UTC ISO ("…Z"); render in the user's local time.
+  const date = typeof d === 'string' ? new Date(d) : d
+  return new Intl.DateTimeFormat('it-IT', { hour: '2-digit', minute: '2-digit' }).format(date)
 }
 
 export function fmtMonth(yearMonth: string): string {

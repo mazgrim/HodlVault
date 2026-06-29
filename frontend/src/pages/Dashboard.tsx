@@ -2,14 +2,15 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import KpiCard from '../components/KpiCard'
+import ChangeBadge from '../components/ChangeBadge'
 import PortfolioSelector from '../components/PortfolioSelector'
 import { PageSpinner } from '../components/Spinner'
 import { usePortfolios } from '../context/PortfoliosContext'
 import { marketApi } from '../api'
-import { fmtEur, fmtPct, fmtNum, fmtDate, pnlClass, pnlSign } from '../utils/format'
+import { fmtEur, fmtPct, fmtNum, fmtDate, fmtAxisEur, pnlClass, pnlSign } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
 
-const PERIODS = ['1M', '3M', '6M', 'YTD', '1Y', 'All'] as const
+const PERIODS = ['1G', '1S', '1M', '3M', '6M', 'YTD', '1Y', 'All'] as const
 
 function fmtAge(days: number): { value: string; subtitle: string } {
   if (days < 365) {
@@ -68,6 +69,7 @@ export default function Dashboard() {
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [positions, setPositions] = useState<Position[]>([])
   const [chart, setChart] = useState<{ date: string; value: number }[]>([])
+  const [chartChange, setChartChange] = useState<{ abs: number | null; pct: number | null }>({ abs: null, pct: null })
   const [period, setPeriod] = useState<string>('1Y')
   const [loading, setLoading] = useState(true)
   const [pnlMode, setPnlMode] = useState<'unrealized' | 'realized'>('unrealized')
@@ -83,6 +85,7 @@ export default function Dashboard() {
       setKpis(kRes.data)
       setPositions(pRes.data)
       setChart(cRes.data.points)
+      setChartChange({ abs: cRes.data.change ?? null, pct: cRes.data.change_pct ?? null })
     } catch (e) {
       console.error(e)
     } finally {
@@ -201,7 +204,10 @@ export default function Dashboard() {
           {/* Chart */}
           <div className="card">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-              <h2 className="text-base font-semibold text-gray-200">Valore nel Tempo</h2>
+              <div className="flex flex-col gap-1.5">
+                <h2 className="text-base font-semibold text-gray-200">Valore nel Tempo</h2>
+                <ChangeBadge label={period} amount={chartChange.abs} pct={chartChange.pct} />
+              </div>
               <div className="flex gap-1 flex-wrap">
                 {PERIODS.map((p) => (
                   <button
@@ -236,8 +242,8 @@ export default function Dashboard() {
                   <YAxis
                     domain={[minVal, 'auto']}
                     tick={{ fontSize: 11 }}
-                    tickFormatter={(v) => `€${(v / 1000).toFixed(0)}k`}
-                    width={60}
+                    tickFormatter={(v) => fmtAxisEur(v)}
+                    width={64}
                   />
                   <Tooltip
                     formatter={(v: number) => [fmtEur(v), 'Valore']}

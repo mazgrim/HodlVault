@@ -574,6 +574,28 @@ class MarketService:
         self.db.commit()
         logger.info(f"Historical prices loaded for {inst.ticker!r}: {len(prices)} rows")
 
+    async def _intraday_chart(self, instrument_id: int) -> list:
+        """5-minute intraday series for the most recent session (the 1G view).
+
+        Returns [{date: ISO-UTC-timestamp, price}] and is NOT persisted —
+        PriceHistory is a daily table (unique by date), so intraday rows would
+        collide. The frontend renders these with hour:minute on the X axis.
+        """
+        inst = self.db.query(Instrument).filter(Instrument.id == instrument_id).first()
+        if not inst:
+            return []
+        result = await _fetch_chart(inst.ticker, range_="1d", interval="5m")
+        if not result:
+            return []
+        timestamps = result.get("timestamp") or []
+        closes = (result.get("indicators") or {}).get("quote", [{}])[0].get("close") or []
+        out = []
+        for ts, price in zip(timestamps, closes):
+            if price is None:
+                continue
+            out.append({"date": datetime.utcfromtimestamp(ts).isoformat() + "Z", "price": float(price)})
+        return out
+
     async def fetch_dividend_history(self, ticker: str, range_: str = "10y") -> List[tuple]:
         """Fetch the dividend (ex-date, amount-per-share) history for a ticker
         from Yahoo. Amount is per share, in the security's own currency."""
@@ -595,13 +617,23 @@ class MarketService:
         """
         from datetime import timedelta
 
+        # 1G → intraday (5-min) line for the current session, with timestamps.
+        # Falls through to the daily path if intraday data isn't available.
+        if period == "1G":
+            intraday = await self._intraday_chart(instrument_id)
+            if intraday:
+                return intraday
+
         yf_range = {
+            "1G": "5d", "1S": "1mo",
             "YTD": "ytd", "1A": "1y", "3A": "3y",
             "5A": "5y", "10A": "10y", "Max": "max",
         }.get(period, "1y")
 
         today = date.today()
         cutoff_map = {
+            "1G":  today - timedelta(days=4),   # vedi nota in _period_cutoff
+            "1S":  today - timedelta(days=7),
             "YTD": date(today.year, 1, 1),
             "1A":  today - timedelta(days=365),
             "3A":  today - timedelta(days=365 * 3),
@@ -696,6 +728,9 @@ class MarketService:
     def _period_cutoff(period: str) -> date:
         today = date.today()
         mapping = {
+            # 1G allarga a 4 giorni per attraversare il weekend e mostrare almeno
+            # le ultime 2 sessioni (i prezzi sono giornalieri, non intraday).
+            "1G": 4, "1S": 7,
             "1M": 30, "3M": 91, "6M": 182,
             "YTD": (today - date(today.year, 1, 1)).days,
             "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5, "All": 365 * 30,

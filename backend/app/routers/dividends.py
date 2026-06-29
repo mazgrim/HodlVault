@@ -35,14 +35,70 @@ def create_dividend(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_write),
 ):
+    from ..services.tax import compute_net
+
     pids = _user_portfolio_ids(current_user.id, db)
     if payload.portfolio_id not in pids:
         raise HTTPException(status_code=403, detail="Accesso negato")
-    ev = models.DividendEvent(**payload.model_dump())
+
+    inst = db.query(models.Instrument).filter(models.Instrument.id == payload.instrument_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Strumento non trovato")
+
+    # Lordo: esplicito, oppure derivato dal netto (retro-compatibilità).
+    gross = payload.gross_amount if payload.gross_amount is not None else payload.amount
+    if gross is None:
+        raise HTTPException(status_code=422, detail="Indicare l'importo lordo o netto")
+
+    if payload.tax_amount is not None or payload.foreign_tax_amount is not None:
+        # Tasse fornite manualmente: rispettarle.
+        foreign_tax = payload.foreign_tax_amount or 0.0
+        italian_tax = payload.tax_amount or 0.0
+        net = gross - foreign_tax - italian_tax
+    elif payload.amount is not None and payload.gross_amount is None:
+        # Solo netto fornito: nessuna stima, tasse a 0.
+        net, foreign_tax, italian_tax = payload.amount, 0.0, 0.0
+    else:
+        bd = compute_net(
+            gross, payload.type, inst.asset_class, inst.country,
+            accrued_interest=payload.accrued_interest,
+        )
+        net, foreign_tax, italian_tax = bd.net, bd.foreign_tax, bd.italian_tax
+
+    ev = models.DividendEvent(
+        portfolio_id=payload.portfolio_id,
+        instrument_id=payload.instrument_id,
+        date=payload.date,
+        amount=round(net, 4),
+        gross_amount=round(gross, 4),
+        foreign_tax_amount=round(foreign_tax, 4),
+        tax_amount=round(italian_tax, 4),
+        accrued_interest=payload.accrued_interest,
+        currency=payload.currency,
+        fx_rate=payload.fx_rate,
+        type=payload.type,
+    )
     db.add(ev)
     db.commit()
     db.refresh(ev)
     return ev
+
+
+@router.post("/sync")
+async def sync_dividends(
+    portfolio_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_write),
+):
+    """Recupera da Yahoo lo storico dividendi degli strumenti posseduti e crea
+    gli eventi mancanti (proporzionali alle quote, tassati lordo→netto)."""
+    if portfolio_id is not None:
+        pids = _user_portfolio_ids(current_user.id, db)
+        if portfolio_id not in pids:
+            raise HTTPException(status_code=403, detail="Accesso negato")
+    calc = DividendCalculator(db, current_user.id)
+    created = await calc.sync_from_market(portfolio_id)
+    return {"created": created}
 
 
 @router.delete("/{div_id}", status_code=204)

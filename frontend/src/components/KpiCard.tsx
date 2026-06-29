@@ -1,5 +1,6 @@
 import { ReactNode } from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
+import InfoHint from './InfoHint'
 
 interface Props {
   title: string
@@ -8,12 +9,13 @@ interface Props {
   trend?: number       // shows colored % badge + colors value text
   colorByValue?: number // only colors value text, no badge
   icon?: ReactNode
+  info?: string        // shows an "i" tooltip next to the title (e.g. how the metric is computed)
   gold?: boolean
   compact?: boolean    // uses text-xl instead of text-2xl (for long currency values)
   center?: boolean     // centers title/value/subtitle (no icon row), matches dashboard layout
 }
 
-export default function KpiCard({ title, value, subtitle, trend, colorByValue, icon, gold, compact, center }: Props) {
+export default function KpiCard({ title, value, subtitle, trend, colorByValue, icon, info, gold, compact, center }: Props) {
   const borderClass = gold ? 'border-gold-500/50 shadow-gold-500/10 shadow-lg' : 'border-gray-700/40'
   const isPositive = trend !== undefined ? trend > 0 : colorByValue !== undefined ? colorByValue > 0 : false
   const isNegative = trend !== undefined ? trend < 0 : colorByValue !== undefined ? colorByValue < 0 : false
@@ -22,7 +24,10 @@ export default function KpiCard({ title, value, subtitle, trend, colorByValue, i
   return (
     <div className={`card ${borderClass} flex flex-col gap-2 ${center ? 'items-center text-center' : ''}`}>
       <div className={`flex items-center gap-2 w-full ${center ? 'justify-center' : 'justify-between'}`}>
-        <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">{title}</span>
+        <span className="flex items-center gap-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider">
+          {title}
+          {info && <InfoHint text={info} />}
+        </span>
         {icon && !center && <span className="text-gray-500">{icon}</span>}
       </div>
       <div className={`flex items-end gap-2 min-w-0 ${center ? 'justify-center' : 'justify-between'}`}>

@@ -107,7 +107,11 @@ class DividendEvent(Base):
     portfolio_id = Column(Integer, ForeignKey("portfolios.id"), nullable=False)
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False)
     date = Column(Date, nullable=False, index=True)
-    amount = Column(Float, nullable=False)          # in original currency
+    amount = Column(Float, nullable=False)          # NETTO incassato, in original currency (= gross - foreign_tax - tax)
+    gross_amount = Column(Float, nullable=True)     # LORDO, in original currency
+    foreign_tax_amount = Column(Float, default=0.0) # ritenuta alla fonte estera, original currency
+    tax_amount = Column(Float, default=0.0)         # imposta sostitutiva italiana (26%/12,5%), original currency
+    accrued_interest = Column(Float, default=0.0)   # rateo cedolare pagato all'acquisto (solo cedole bond), original currency
     currency = Column(String(8), default="EUR")
     fx_rate = Column(Float, default=1.0)
     type = Column(Enum(DividendType), default=DividendType.DIVIDEND)

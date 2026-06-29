@@ -24,6 +24,7 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     # Create tables
     Base.metadata.create_all(bind=engine)
+    _ensure_dividend_columns()
     logger.info("Database tables ready.")
 
     # Backfill historical FX (for EUR conversion of return series) in the background
@@ -44,6 +45,34 @@ async def lifespan(app: FastAPI):
     yield
 
     scheduler.shutdown(wait=False)
+
+
+def _ensure_dividend_columns():
+    """
+    Lightweight idempotent migration (no Alembic): add the gross/tax columns to
+    dividend_events on SQLite if they are missing, backfilling existing rows so
+    `gross_amount = amount` (i dati storici restano invariati: tasse = 0).
+    """
+    from sqlalchemy import text
+    new_cols = {
+        "gross_amount": "FLOAT",
+        "foreign_tax_amount": "FLOAT DEFAULT 0.0",
+        "tax_amount": "FLOAT DEFAULT 0.0",
+        "accrued_interest": "FLOAT DEFAULT 0.0",
+    }
+    try:
+        with engine.begin() as conn:
+            existing = {row[1] for row in conn.execute(text("PRAGMA table_info(dividend_events)"))}
+            for col, ddl in new_cols.items():
+                if col not in existing:
+                    conn.execute(text(f"ALTER TABLE dividend_events ADD COLUMN {col} {ddl}"))
+                    logger.info(f"Migration: added dividend_events.{col}")
+            # Backfill gross for legacy rows where it's NULL.
+            conn.execute(text(
+                "UPDATE dividend_events SET gross_amount = amount WHERE gross_amount IS NULL"
+            ))
+    except Exception as exc:
+        logger.warning(f"Dividend columns migration skipped: {exc}")
 
 
 async def _startup_fx_backfill():

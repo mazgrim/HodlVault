@@ -140,3 +140,10 @@ Standalone financial calculators backed by `/api/tools`, organised in tabs: **In
 | `LOGIN_MAX_ATTEMPTS` | `5` | Failed logins (per IP or account) before lockout |
 | `LOGIN_LOCKOUT_MINUTES` | `15` | Lockout window/duration for the login throttle |
 | `LOGIN_ATTEMPT_RETENTION_DAYS` | `90` | Days the login access log is kept before pruning |
+| `TAX_RATE_DIVIDEND` | `0.26` | Imposta sostitutiva italiana sui dividendi azionari/ETF |
+| `TAX_RATE_COUPON` | `0.125` | Imposta sostitutiva sulle cedole bond / titoli di Stato |
+| `FOREIGN_WHT_<ISO>` | — | Override ritenuta estera per paese (es. `FOREIGN_WHT_US=0.30`) |
+
+### Dividendi: storico, tassazione, sync (`services/tax.py`, `DividendCalculator.sync_from_market`)
+
+`DividendEvent` registra il **lordo** (`gross_amount`), la **ritenuta estera** (`foreign_tax_amount`), l'**imposta italiana** (`tax_amount`) e il **rateo cedolare** (`accrued_interest`); `amount` è il **netto** (= lordo − tasse), quindi il P&L realizzato (`_calc_realized_dividends`) è già al netto. `services/tax.py::compute_net` stima la doppia imposizione (ritenuta estera per paese da `Instrument.country` + 26%/12,5% italiano sul netto frontiera); se il CSV del broker fornisce la ritenuta reale (es. Trade Republic) quella ha la precedenza. `POST /api/dividends/sync` recupera da Yahoo (`chart` con `events=div`) lo storico dividendi degli strumenti posseduti e crea gli eventi proporzionali alle quote detenute alla ex-date (idempotente via UniqueConstraint). Le 4 colonne sono aggiunte a startup da `_ensure_dividend_columns` in `main.py` (ALTER idempotente, niente Alembic).

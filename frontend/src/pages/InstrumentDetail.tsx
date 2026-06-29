@@ -6,14 +6,15 @@ import {
 } from 'recharts'
 import { ArrowLeft, TrendingUp, Wallet, BarChart2 } from 'lucide-react'
 import KpiCard from '../components/KpiCard'
+import ChangeBadge from '../components/ChangeBadge'
 import { PageSpinner } from '../components/Spinner'
 import { marketApi } from '../api'
-import { fmtEur, fmtPct, fmtNum, fmtDate, pnlClass, pnlSign } from '../utils/format'
+import { fmtEur, fmtPct, fmtNum, fmtDate, fmtDateTime, fmtTime, pnlClass, pnlSign } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
 
 // ── Periods ───────────────────────────────────────────────────────────────────
 
-const PERIODS = ['YTD', '1A', '3A', '5A', '10A', 'Max'] as const
+const PERIODS = ['1G', '1S', 'YTD', '1A', '3A', '5A', '10A', 'Max'] as const
 type Period = typeof PERIODS[number]
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -181,6 +182,20 @@ export default function InstrumentDetail() {
 
   const { instrument, position, transactions, dividends, buy_dates } = detail
 
+  // ── Period change (from the visible chart): native price move first→last,
+  // plus the EUR move on the held position (price delta at today's FX rate). ──
+  let changePct: number | null = null
+  let changeEur: number | null = null
+  if (chartPoints.length >= 2) {
+    const first = chartPoints[0].price
+    const last = chartPoints[chartPoints.length - 1].price
+    if (first) changePct = (last - first) / first * 100
+    if (position && position.current_price) {
+      const fx = position.current_price_orig / position.current_price  // orig units per EUR
+      changeEur = position.quantity * (last - first) / (fx || 1)
+    }
+  }
+
   // ── Chart derived values ───────────────────────────────────────────────────
   const minPrice = chartPoints.length ? Math.min(...chartPoints.map(p => p.price)) * 0.97 : 0
 
@@ -269,7 +284,10 @@ export default function InstrumentDetail() {
       {/* ── Price Chart ────────────────────────────────────────────────────── */}
       <div className="card">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <h2 className="text-base font-semibold text-gray-200">Prezzo Storico</h2>
+          <div className="flex flex-col gap-1.5">
+            <h2 className="text-base font-semibold text-gray-200">Prezzo Storico</h2>
+            <ChangeBadge label={period} amount={changeEur} pct={changePct} />
+          </div>
           <div className="flex gap-1 flex-wrap">
             {PERIODS.map(p => (
               <button
@@ -328,7 +346,7 @@ export default function InstrumentDetail() {
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize: 11 }}
-                  tickFormatter={(v) => v?.slice(5)}
+                  tickFormatter={(v) => (period === '1G' && v?.includes('T')) ? fmtTime(v) : v?.slice(5)}
                   interval="preserveStartEnd"
                 />
                 <YAxis
@@ -346,7 +364,7 @@ export default function InstrumentDetail() {
                     `${v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${instrument.currency}`,
                     'Prezzo',
                   ]}
-                  labelFormatter={(l) => fmtDate(l)}
+                  labelFormatter={(l) => (period === '1G' && String(l).includes('T')) ? fmtDateTime(l) : fmtDate(l)}
                   contentStyle={tooltip()}
                 />
                 <Area

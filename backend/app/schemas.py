@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, computed_field
 from .models import TransactionType, DividendType, AssetClass
 
 # Alias to the date type. Some models have a field literally named `date`; an
@@ -147,7 +147,13 @@ class DividendCreate(BaseModel):
     portfolio_id: int
     instrument_id: int
     date: date
-    amount: float = Field(gt=0)
+    # `amount` (netto) resta accettato per retro-compatibilità; se non sono
+    # indicate le tasse, il router stima il netto da `gross_amount`.
+    amount: Optional[float] = Field(default=None, gt=0)
+    gross_amount: Optional[float] = Field(default=None, gt=0)
+    foreign_tax_amount: Optional[float] = Field(default=None, ge=0)
+    tax_amount: Optional[float] = Field(default=None, ge=0)
+    accrued_interest: float = Field(default=0.0, ge=0)
     currency: str = "EUR"
     fx_rate: float = Field(default=1.0, gt=0)
     type: DividendType = DividendType.DIVIDEND
@@ -158,10 +164,28 @@ class DividendOut(BaseModel):
     instrument_id: int
     instrument: InstrumentOut
     date: date
-    amount: float
+    amount: float                                 # NETTO (orig ccy)
+    gross_amount: Optional[float] = None          # LORDO (orig ccy)
+    foreign_tax_amount: float = 0.0
+    tax_amount: float = 0.0
+    accrued_interest: float = 0.0
     currency: str
     fx_rate: float
     type: DividendType
+
+    @computed_field
+    @property
+    def foreign_tax_rate(self) -> float:
+        gross = self.gross_amount or self.amount
+        return round(self.foreign_tax_amount / gross, 4) if gross else 0.0
+
+    @computed_field
+    @property
+    def italian_tax_rate(self) -> float:
+        gross = self.gross_amount or self.amount
+        base = (gross or 0.0) - self.accrued_interest - self.foreign_tax_amount
+        return round(self.tax_amount / base, 4) if base > 0 else 0.0
+
     model_config = {"from_attributes": True}
 
 
@@ -218,6 +242,10 @@ class PortfolioChartPoint(BaseModel):
 
 class PortfolioChartResponse(BaseModel):
     points: List[PortfolioChartPoint]
+    # Variazione di mercato sul periodo mostrato (EUR e %, al netto di
+    # versamenti/prelievi nella finestra). None quando i punti sono < 2.
+    change: Optional[float] = None
+    change_pct: Optional[float] = None
 
 
 # ── Performance ───────────────────────────────────────────────────────────────
@@ -283,8 +311,10 @@ class AnalysisResponse(BaseModel):
 # ── Dividends page ────────────────────────────────────────────────────────────
 
 class DividendKPIs(BaseModel):
-    total_ytd: float
-    total_all_time: float
+    total_ytd: float          # netto
+    total_all_time: float     # netto
+    total_gross: float = 0.0  # lordo
+    total_tax: float = 0.0    # tasse (estera + italiana)
     avg_yield_on_cost: float
 
 class DividendProjection(BaseModel):

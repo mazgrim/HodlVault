@@ -77,6 +77,8 @@ export const divApi = {
     api.get('/dividends/', { params: portfolio_id ? { portfolio_id } : {} }),
   create: (data: object) => api.post('/dividends/', data),
   delete: (id: number) => api.delete(`/dividends/${id}`),
+  sync: (portfolio_id?: number) =>
+    api.post('/dividends/sync', null, { params: portfolio_id ? { portfolio_id } : {} }),
   kpis: (portfolio_id?: number) =>
     api.get('/dividends/kpis', { params: portfolio_id ? { portfolio_id } : {} }),
   monthly: (portfolio_id?: number) =>

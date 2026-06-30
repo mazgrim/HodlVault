@@ -226,11 +226,33 @@ function FireTool() {
   return (
     <div className="space-y-8">
 
+      {/* ── Intro ───────────────────────────────────────────────────────────── */}
+      <div className="text-xs text-gray-400 leading-relaxed bg-navy-800/60 border border-gray-700/40 rounded-lg p-3 space-y-1.5">
+        <p>
+          Il movimento <span className="text-gold-400 font-medium">FIRE</span> (Financial Independence, Retire Early)
+          punta ad accumulare un capitale che, investito, copra le tue spese senza bisogno di lavorare.
+          Questo strumento ti guida in 5 passi:
+        </p>
+        <p>
+          <span className="text-gray-300">①</span> quanto ti serve (FIRE Number) ·
+          <span className="text-gray-300"> ②</span> se sei già a metà strada (Coast FIRE) ·
+          <span className="text-gray-300"> ③</span> fra quanti anni ci arrivi ·
+          <span className="text-gray-300"> ④</span> quanto incide il fisco italiano ·
+          <span className="text-gray-300"> ⑤</span> quanto è solido il piano (Monte Carlo).
+        </p>
+        <p className="text-gray-600">Tutti i calcoli sono indicativi e non costituiscono consulenza finanziaria.</p>
+      </div>
+
       {/* ── § 1 Spese mensili & FIRE Number ─────────────────────────────────── */}
       <div>
-        <h3 className="text-base font-semibold text-gray-100 mb-3 flex items-center gap-2">
+        <h3 className="text-base font-semibold text-gray-100 mb-1 flex items-center gap-2">
           <span className="text-gold-500">①</span> Spese Mensili &amp; FIRE Number
         </h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Il FIRE Number è il capitale che ti rende indipendente: spese annue moltiplicate per l'inverso del
+          Safe Withdrawal Rate (SWR), il tasso che puoi prelevare ogni anno senza esaurire il capitale.
+          Es. con SWR 4% servono 25× le spese annue. Scegli lo scenario SWR nella tabella sotto.
+        </p>
 
         <div className="space-y-2 mb-2">
           <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_9rem_10rem_1.5rem] gap-2 px-1">
@@ -358,7 +380,12 @@ function FireTool() {
         <h3 className="text-base font-semibold text-gray-100 mb-1 flex items-center gap-2">
           <span className="text-gold-500">③</span> Quanti anni mancano al tuo FIRE?
         </h3>
-        <p className="text-xs text-gray-500 mb-3">
+        <p className="text-xs text-gray-500 mb-1">
+          Stima fra quanti anni raggiungi il FIRE Number, partendo dal patrimonio già investito, dal risparmio che
+          investi ogni mese e dal rendimento annuo atteso. Il grafico mostra la crescita del patrimonio rispetto ai
+          soli contributi e al target.
+        </p>
+        <p className="text-xs text-gray-600 mb-3">
           Formula: n = log[(FIRE + PMT/r) ÷ (Patrimonio + PMT/r)] ÷ log(1 + r), dove r = rendimento mensile
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">

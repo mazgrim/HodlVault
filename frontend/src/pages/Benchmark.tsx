@@ -148,41 +148,52 @@ export default function Benchmark() {
         </div>
       </div>
 
-      {/* Period selector + mode toggle */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex gap-1 flex-wrap">
-          {PERIODS.map(p => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
-                period === p
-                  ? 'bg-gold-500 text-[#14110a] font-bold'
-                  : 'bg-navy-700/50 text-gray-400 hover:text-gray-200 hover:bg-navy-700'
-              }`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-        <div className="inline-flex rounded-lg border border-gray-600/40 overflow-hidden text-xs font-medium self-start">
-          {([['twr', 'TWR'], ['invested', 'A versamenti']] as const).map(([m, lbl]) => (
+      {/* Mode toggle — prominent, two clearly-labelled choices */}
+      <div className="card">
+        <p className="text-xs text-gray-400 uppercase tracking-wider mb-3">Modalità di confronto</p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          {([
+            ['twr', 'TWR — Rendimento di mercato', 'Base 100, indipendente dai versamenti'],
+            ['invested', 'A versamenti — Guadagno reale', 'In €, con IRR: tiene conto di quando hai investito'],
+          ] as const).map(([m, title, desc]) => (
             <button
               key={m}
               onClick={() => setMode(m)}
-              className={`px-3 py-1.5 transition-colors ${
+              className={`flex-1 text-left rounded-lg border px-4 py-3 transition-all ${
                 mode === m
-                  ? 'bg-gold-500/20 text-gold-400'
-                  : 'bg-navy-700/40 text-gray-400 hover:text-gray-200'
+                  ? 'bg-gold-500/15 border-gold-500/50 ring-1 ring-gold-500/30'
+                  : 'bg-navy-700/40 border-gray-600/40 hover:border-gray-500'
               }`}
-              title={m === 'twr'
-                ? 'Time-Weighted Return: rendimento di mercato, base 100, indipendente dai versamenti'
-                : 'A parità di versamenti: valore in € investendo gli stessi soldi negli stessi giorni nel benchmark'}
             >
-              {lbl}
+              <div className={`flex items-center gap-2 text-sm font-semibold ${mode === m ? 'text-gold-300' : 'text-gray-200'}`}>
+                <span className={`flex items-center justify-center w-4 h-4 rounded-full border ${
+                  mode === m ? 'border-gold-400' : 'border-gray-500'
+                }`}>
+                  {mode === m && <span className="w-2 h-2 rounded-full bg-gold-400" />}
+                </span>
+                {title}
+              </div>
+              <div className="text-[11px] text-gray-400 mt-1 pl-6">{desc}</div>
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Period selector */}
+      <div className="flex gap-1 flex-wrap">
+        {PERIODS.map(p => (
+          <button
+            key={p}
+            onClick={() => setPeriod(p)}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+              period === p
+                ? 'bg-gold-500 text-[#14110a] font-bold'
+                : 'bg-navy-700/50 text-gray-400 hover:text-gray-200 hover:bg-navy-700'
+            }`}
+          >
+            {p}
+          </button>
+        ))}
       </div>
 
       {/* Chart */}

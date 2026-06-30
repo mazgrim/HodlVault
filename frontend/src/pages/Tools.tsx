@@ -34,6 +34,10 @@ function CompoundTool() {
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-gray-500">
+        Mostra come cresce un capitale nel tempo con l'interesse composto: parti da un capitale iniziale, aggiungi
+        versamenti periodici e applica il rendimento annuo. Indicando un'inflazione vedi anche il valore reale (potere d'acquisto).
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {[['Capitale iniziale (€)', 'initial', 'number'], ['Versamento periodico (€)', 'periodic', 'number'],
           ['Tasso annuo (%)', 'rate_pct', 'number'], ['Anni', 'years', 'number'],
@@ -629,6 +633,10 @@ function PacTool() {
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-gray-500">
+        Confronta due strategie a parità di capitale totale: investirlo tutto subito (Lump Sum) oppure diluirlo
+        in versamenti periodici (PAC, Piano di Accumulo). Mostra valore finale, rendimento totale e CAGR di entrambe.
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[['Importo totale (€)', 'total_amount'], ['Anni', 'years'], ['Rendimento atteso (%)', 'expected_return_pct']].map(([label, key]) => (
           <div key={key}>
@@ -700,6 +708,10 @@ function InflationTool() {
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-gray-500">
+        Mostra quanto potere d'acquisto perde una somma di denaro nel tempo a causa dell'inflazione: il suo valore
+        reale all'anno di arrivo e quanto servirebbe per mantenere lo stesso potere d'acquisto.
+      </p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[['Importo (€)', 'amount'], ['Anno di partenza', 'start_year'], ['Anno di arrivo', 'end_year'], ['Inflazione media (%)', 'inflation_pct']].map(([label, key]) => (
           <div key={key}>

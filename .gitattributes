@@ -1,0 +1,3 @@
+# Gli script di shell devono avere fine-riga LF anche se committati da Windows,
+# altrimenti su Linux falliscono con "bad interpreter".
+*.sh text eol=lf

@@ -35,6 +35,12 @@ const EXPORT_HELP: Record<string, { title: string; steps: string }[]> = {
       steps: 'Sezione Account → menu "Ordini e contabili", seleziona il periodo desiderato, poi "Esporta in Excel" (in basso a sinistra).',
     },
   ],
+  'Trade Republic': [
+    {
+      title: 'Estratto conto',
+      steps: 'Nell\'app: account (icona col tuo nome in alto a destra) → Estratti conto → "Esporta operazioni", seleziona il periodo e salva il CSV.',
+    },
+  ],
 }
 
 function typeBadge(row: ParsedRow) {
@@ -229,11 +235,15 @@ export default function Import() {
               <Info size={15} className="text-gold-500/80 flex-shrink-0 mt-0.5" />
               <div className="text-xs text-gray-400 leading-relaxed">
                 <p className="text-gray-300 font-medium mb-1">Dove trovare i file da esportare ({broker})</p>
-                <p className="mb-1">Puoi importare {EXPORT_HELP[broker].length === 2 ? 'due tipi di file' : 'questi file'}:</p>
+                <p className="mb-1">
+                  {EXPORT_HELP[broker].length > 1 ? 'Puoi esportare più tipi di file:' : 'Come esportare il file:'}
+                </p>
                 <ul className="space-y-1">
                   {EXPORT_HELP[broker].map((m, i) => (
                     <li key={i}>
-                      <span className="text-gold-400/90 font-medium">{i + 1}) {m.title}</span> — {m.steps}
+                      <span className="text-gold-400/90 font-medium">
+                        {EXPORT_HELP[broker].length > 1 ? `${i + 1}) ` : ''}{m.title}
+                      </span> — {m.steps}
                     </li>
                   ))}
                 </ul>

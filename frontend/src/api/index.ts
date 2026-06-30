@@ -117,9 +117,13 @@ export const adminApi = {
 // ── Benchmark ─────────────────────────────────────────────────────────────────
 export const benchmarkApi = {
   available: () => api.get('/benchmark/available'),
-  chart: (tickers: string[], period: string, portfolio_id?: number) =>
+  chart: (tickers: string[], period: string, portfolio_id?: number, mode: string = 'twr', exclude: number[] = []) =>
     api.get('/benchmark/chart', {
-      params: { tickers: tickers.join(','), period, ...(portfolio_id ? { portfolio_id } : {}) },
+      params: {
+        tickers: tickers.join(','), period, mode,
+        ...(exclude.length ? { exclude: exclude.join(',') } : {}),
+        ...(portfolio_id ? { portfolio_id } : {}),
+      },
     }),
 }
 

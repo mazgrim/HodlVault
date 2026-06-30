@@ -226,6 +226,50 @@ class DashboardCalculator:
             as_of_date=date.today(),
         )
 
+    def portfolio_instruments(self, portfolio_id: Optional[int] = None) -> List[dict]:
+        """Instruments ever traded in the portfolio (for the what-if checkboxes)."""
+        pids = _user_portfolio_ids(self.user_id, self.db, portfolio_id)
+        if not pids:
+            return []
+        rows = (
+            self.db.query(Instrument.id, Instrument.ticker, Instrument.name)
+            .join(Transaction, Transaction.instrument_id == Instrument.id)
+            .filter(Transaction.portfolio_id.in_(pids))
+            .distinct()
+            .all()
+        )
+        return [
+            {"instrument_id": r[0], "ticker": r[1], "name": r[2]}
+            for r in sorted(rows, key=lambda x: (x[2] or "").lower())
+        ]
+
+    def invested_flows(
+        self, portfolio_id: Optional[int], after: date, through: date,
+        exclude_instrument_ids: Optional[List[int]] = None,
+    ) -> List[Tuple[date, float]]:
+        """External cash flows in (after, through] as (date, signed EUR): a BUY is
+        positive (cash invested), a SELL negative (cash returned). Instruments in
+        *exclude_instrument_ids* are dropped (the 'as if never bought' what-if)."""
+        pids = _user_portfolio_ids(self.user_id, self.db, portfolio_id)
+        if not pids:
+            return []
+        q = self.db.query(Transaction).filter(
+            Transaction.portfolio_id.in_(pids),
+            Transaction.date > after,
+            Transaction.date <= through,
+        )
+        if exclude_instrument_ids:
+            q = q.filter(~Transaction.instrument_id.in_(exclude_instrument_ids))
+        flows: List[Tuple[date, float]] = []
+        for tx in q.order_by(Transaction.date).all():
+            price_eur = tx.price / tx.fx_rate if tx.fx_rate else tx.price
+            fees_eur = tx.fees / tx.fx_rate if tx.fx_rate else tx.fees
+            if tx.type == TransactionType.BUY:
+                flows.append((tx.date, price_eur * tx.quantity + fees_eur))
+            else:
+                flows.append((tx.date, -(price_eur * tx.quantity - fees_eur)))
+        return flows
+
     def _net_flow_eur(self, pids: List[int], after: date, through: date) -> float:
         """Net cash invested (buys cost − sells proceeds, in EUR) for transactions
         dated in (after, through]. Used to strip contributions out of a value change."""
@@ -266,13 +310,15 @@ class DashboardCalculator:
             return None
 
     def portfolio_chart(
-        self, portfolio_id: Optional[int] = None, period: str = "1Y"
+        self, portfolio_id: Optional[int] = None, period: str = "1Y",
+        exclude_instrument_ids: Optional[List[int]] = None,
     ) -> schemas.PortfolioChartResponse:
-        key = ("chart", self.user_id, portfolio_id, period)
-        return _cached_series(key, lambda: self._portfolio_chart_compute(portfolio_id, period))
+        key = ("chart", self.user_id, portfolio_id, period, tuple(sorted(exclude_instrument_ids or ())))
+        return _cached_series(key, lambda: self._portfolio_chart_compute(portfolio_id, period, exclude_instrument_ids))
 
     def _portfolio_chart_compute(
-        self, portfolio_id: Optional[int] = None, period: str = "1Y"
+        self, portfolio_id: Optional[int] = None, period: str = "1Y",
+        exclude_instrument_ids: Optional[List[int]] = None,
     ) -> schemas.PortfolioChartResponse:
         """Approximate portfolio value series by summing position values day by day."""
         pids = _user_portfolio_ids(self.user_id, self.db, portfolio_id)
@@ -288,6 +334,9 @@ class DashboardCalculator:
             .order_by(Transaction.date)
             .all()
         )
+        if exclude_instrument_ids:
+            excl = set(exclude_instrument_ids)
+            all_txs = [t for t in all_txs if t.instrument_id not in excl]
         if not all_txs:
             return schemas.PortfolioChartResponse(points=[])
 
@@ -599,13 +648,15 @@ class DashboardCalculator:
         )
 
     def portfolio_twr_chart(
-        self, portfolio_id: Optional[int] = None, period: str = "All"
+        self, portfolio_id: Optional[int] = None, period: str = "All",
+        exclude_instrument_ids: Optional[List[int]] = None,
     ) -> List[Tuple[date, float]]:
-        key = ("twr", self.user_id, portfolio_id, period)
-        return _cached_series(key, lambda: self._portfolio_twr_chart_compute(portfolio_id, period))
+        key = ("twr", self.user_id, portfolio_id, period, tuple(sorted(exclude_instrument_ids or ())))
+        return _cached_series(key, lambda: self._portfolio_twr_chart_compute(portfolio_id, period, exclude_instrument_ids))
 
     def _portfolio_twr_chart_compute(
-        self, portfolio_id: Optional[int] = None, period: str = "All"
+        self, portfolio_id: Optional[int] = None, period: str = "All",
+        exclude_instrument_ids: Optional[List[int]] = None,
     ) -> List[Tuple[date, float]]:
         """
         Time-Weighted Return series (base 1.0 = start).
@@ -625,6 +676,9 @@ class DashboardCalculator:
             .order_by(Transaction.date)
             .all()
         )
+        if exclude_instrument_ids:
+            excl = set(exclude_instrument_ids)
+            all_txs = [t for t in all_txs if t.instrument_id not in excl]
         if not all_txs:
             return []
 

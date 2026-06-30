@@ -1,17 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
-import { Info } from 'lucide-react'
+import { Info, Check } from 'lucide-react'
 import PortfolioSelector from '../components/PortfolioSelector'
 import { PageSpinner } from '../components/Spinner'
 import { usePortfolios } from '../context/PortfoliosContext'
 import { benchmarkApi } from '../api'
-import { fmtPct, fmtNum, pnlClass } from '../utils/format'
+import { fmtPct, fmtNum, fmtEur, fmtAxisEur, pnlClass, pnlSign } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
 
 interface BenchmarkInfo { ticker: string; label: string }
+interface BenchmarkHolding { instrument_id: number; ticker: string; name: string }
 interface BenchmarkPoint { date: string; value: number }
 interface BenchmarkSeries {
   key: string; label: string; color: string
@@ -20,7 +21,11 @@ interface BenchmarkSeries {
   annualized_return: number | null
   volatility: number | null
   max_drawdown: number | null
+  gain_eur: number | null
+  irr: number | null
 }
+
+type Mode = 'twr' | 'invested'
 
 const PERIODS = ['3M', '6M', 'YTD', '1A', '3A', '5A', 'Max']
 
@@ -45,11 +50,16 @@ export default function Benchmark() {
   const { portfolios, loading: pfLoading } = usePortfolios()
   const [selectedPf, setSelectedPf] = useState<number | null>(null)
   const [period, setPeriod] = useState('1A')
+  const [mode, setMode] = useState<Mode>('twr')
   const [available, setAvailable] = useState<BenchmarkInfo[]>([])
   const [selected, setSelected] = useState<string[]>(['SWDA.MI', 'SPY'])
   const [series, setSeries] = useState<BenchmarkSeries[]>([])
+  const [holdings, setHoldings] = useState<BenchmarkHolding[]>([])
+  const [excluded, setExcluded] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const excludeKey = useMemo(() => [...excluded].sort((a, b) => a - b).join(','), [excluded])
 
   // Load available benchmarks once
   useEffect(() => {
@@ -66,22 +76,39 @@ export default function Benchmark() {
     setLoading(true)
     setError(null)
     try {
-      const res = await benchmarkApi.chart(selected, period, selectedPf ?? undefined)
+      const ex = excludeKey ? excludeKey.split(',').map(Number) : []
+      const res = await benchmarkApi.chart(selected, period, selectedPf ?? undefined, mode, ex)
       setSeries(res.data.series ?? [])
+      setHoldings(res.data.holdings ?? [])
     } catch (e: any) {
       setError('Impossibile caricare i dati benchmark.')
       console.error(e?.response?.data ?? e)
     } finally {
       setLoading(false)
     }
-  }, [selected, period, selectedPf])
+  }, [selected, period, selectedPf, mode, excludeKey])
 
-  useEffect(() => { load() }, [load])
+  // Debounced: toggling several checkboxes fires a single recompute.
+  useEffect(() => {
+    const t = setTimeout(load, 250)
+    return () => clearTimeout(t)
+  }, [load])
+
+  // Reset the what-if exclusions when switching portfolio (ids aren't comparable).
+  useEffect(() => { setExcluded(new Set()) }, [selectedPf])
 
   const toggleBenchmark = (ticker: string) => {
     setSelected(prev =>
       prev.includes(ticker) ? prev.filter(t => t !== ticker) : [...prev, ticker]
     )
+  }
+
+  const toggleHolding = (id: number) => {
+    setExcluded(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
   }
 
   const chartData = mergeSeries(series)
@@ -121,41 +148,72 @@ export default function Benchmark() {
         </div>
       </div>
 
-      {/* Period selector */}
-      <div className="flex gap-1">
-        {PERIODS.map(p => (
-          <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
-              period === p
-                ? 'bg-gold-500 text-[#14110a] font-bold'
-                : 'bg-navy-700/50 text-gray-400 hover:text-gray-200 hover:bg-navy-700'
-            }`}
-          >
-            {p}
-          </button>
-        ))}
+      {/* Period selector + mode toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex gap-1 flex-wrap">
+          {PERIODS.map(p => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={`px-3 py-1.5 rounded text-xs font-medium transition-all ${
+                period === p
+                  ? 'bg-gold-500 text-[#14110a] font-bold'
+                  : 'bg-navy-700/50 text-gray-400 hover:text-gray-200 hover:bg-navy-700'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <div className="inline-flex rounded-lg border border-gray-600/40 overflow-hidden text-xs font-medium self-start">
+          {([['twr', 'TWR'], ['invested', 'A versamenti']] as const).map(([m, lbl]) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`px-3 py-1.5 transition-colors ${
+                mode === m
+                  ? 'bg-gold-500/20 text-gold-400'
+                  : 'bg-navy-700/40 text-gray-400 hover:text-gray-200'
+              }`}
+              title={m === 'twr'
+                ? 'Time-Weighted Return: rendimento di mercato, base 100, indipendente dai versamenti'
+                : 'A parità di versamenti: valore in € investendo gli stessi soldi negli stessi giorni nel benchmark'}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Chart */}
       <div className="card">
         <h2 className="text-base font-semibold text-gray-200 mb-1">
-          Rendimento Cumulativo (base 100)
+          {mode === 'twr' ? 'Rendimento Cumulativo (base 100)' : 'Valore nel tempo — a parità di versamenti (€)'}
         </h2>
         <p className="text-xs text-gray-500 mb-3">
-          Tutti i valori normalizzati a 100 all'inizio del periodo — confronto diretto indipendente dalla valuta di quotazione.
+          {mode === 'twr'
+            ? "Tutti i valori normalizzati a 100 all'inizio del periodo — confronto diretto indipendente dalla valuta di quotazione."
+            : 'Valore reale in € del tuo portafoglio confrontato con quello che avresti avuto investendo gli stessi versamenti, negli stessi giorni, nel benchmark.'}
         </p>
         <div className="flex items-start gap-1.5 mb-4 p-2.5 rounded-lg bg-navy-700/30 border border-gray-700/30">
           <Info size={13} className="mt-0.5 flex-shrink-0 text-gold-500/70" />
-          <p className="text-xs text-gray-400 leading-relaxed">
-            Il portafoglio è calcolato con il{' '}
-            <span className="text-gold-400 font-medium">TWR — Time-Weighted Return</span>
-            {': '}misura il rendimento puro del mercato eliminando l'effetto dei nuovi capitali investiti nel tempo.
-            A differenza del semplice confronto tra valore iniziale e finale (che includerebbe i versamenti),
-            il TWR calcola il rendimento di ogni sotto-periodo <em>prima</em> di ogni acquisto o vendita e li moltiplica tra loro,
-            rendendo il portafoglio direttamente comparabile agli indici di riferimento.
-          </p>
+          {mode === 'twr' ? (
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Il portafoglio è calcolato con il{' '}
+              <span className="text-gold-400 font-medium">TWR — Time-Weighted Return</span>
+              {': '}misura il rendimento puro del mercato eliminando l'effetto dei nuovi capitali investiti nel tempo.
+              A differenza del semplice confronto tra valore iniziale e finale (che includerebbe i versamenti),
+              il TWR calcola il rendimento di ogni sotto-periodo <em>prima</em> di ogni acquisto o vendita e li moltiplica tra loro,
+              rendendo il portafoglio direttamente comparabile agli indici di riferimento.
+            </p>
+          ) : (
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Confronto <span className="text-gold-400 font-medium">money-weighted</span>: i tuoi versamenti (e prelievi)
+              reali vengono replicati sul benchmark alle stesse date. Le curve partono dallo stesso valore e divergono
+              solo per la diversa performance. In tabella trovi il <em>guadagno in €</em> sul periodo e l'<em>IRR</em>
+              {' '}(rendimento annualizzato che tiene conto di quando hai investito).
+            </p>
+          )}
         </div>
 
         {loading ? (
@@ -165,8 +223,10 @@ export default function Benchmark() {
         ) : error ? (
           <div className="h-72 flex items-center justify-center text-red-400 text-sm">{error}</div>
         ) : chartData.length === 0 ? (
-          <div className="h-72 flex items-center justify-center text-gray-500 text-sm">
-            Nessun dato disponibile per il periodo selezionato
+          <div className="h-72 flex items-center justify-center text-center text-gray-500 text-sm px-6">
+            {excluded.size > 0
+              ? "La selezione non ha posizioni aperte nel periodo scelto (es. titoli già venduti). Prova un periodo più ampio o riattiva qualche titolo."
+              : 'Nessun dato disponibile per il periodo selezionato'}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={320}>
@@ -179,17 +239,20 @@ export default function Benchmark() {
                 tickLine={false}
               />
               <YAxis
-                tickFormatter={v => `${v.toFixed(0)}`}
+                tickFormatter={v => mode === 'twr' ? `${v.toFixed(0)}` : fmtAxisEur(v)}
                 tick={{ fontSize: 10, fill: axisTick }}
                 tickLine={false}
-                width={42}
+                width={mode === 'twr' ? 42 : 64}
               />
-              <ReferenceLine y={100} stroke={grid} strokeDasharray="4 2" />
+              {mode === 'twr' && <ReferenceLine y={100} stroke={grid} strokeDasharray="4 2" />}
               <Tooltip
                 contentStyle={{ ...tooltip(), fontSize: 12 }}
                 formatter={(v: number, name: string) => {
                   const s = series.find(s => s.key === name)
-                  return [`${v >= 100 ? '+' : ''}${(v - 100).toFixed(2)}%`, s?.label ?? name]
+                  const label = s?.label ?? name
+                  return mode === 'twr'
+                    ? [`${v >= 100 ? '+' : ''}${(v - 100).toFixed(2)}%`, label]
+                    : [fmtEur(v), label]
                 }}
                 labelFormatter={v => v}
               />
@@ -242,6 +305,58 @@ export default function Benchmark() {
         )}
       </div>
 
+      {/* What-if: include/exclude holdings */}
+      {holdings.length > 0 && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <p className="text-xs text-gray-400 uppercase tracking-wider">Titoli nel confronto (what-if)</p>
+            <div className="flex gap-3 text-xs">
+              <button
+                onClick={() => setExcluded(new Set())}
+                disabled={excluded.size === 0}
+                className="text-gray-400 hover:text-gold-400 transition-colors disabled:opacity-40"
+              >
+                Tutti
+              </button>
+              <button
+                onClick={() => setExcluded(new Set(holdings.map(h => h.instrument_id)))}
+                disabled={excluded.size === holdings.length}
+                className="text-gray-400 hover:text-gold-400 transition-colors disabled:opacity-40"
+              >
+                Nessuno
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {holdings.map(h => {
+              const included = !excluded.has(h.instrument_id)
+              return (
+                <button
+                  key={h.instrument_id}
+                  onClick={() => toggleHolding(h.instrument_id)}
+                  title={h.name}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                    included
+                      ? 'bg-gold-500/15 border-gold-500/40 text-gold-300'
+                      : 'bg-navy-700/40 border-gray-600/40 text-gray-500 line-through'
+                  }`}
+                >
+                  <span className={`flex items-center justify-center w-3.5 h-3.5 rounded-sm border ${
+                    included ? 'bg-gold-500 border-gold-500' : 'border-gray-500'
+                  }`}>
+                    {included && <Check size={11} className="text-[#14110a]" strokeWidth={3} />}
+                  </span>
+                  {h.ticker}
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-gray-500 mt-3">
+            Deseleziona un titolo per vedere il confronto «come se non l'avessi mai comprato»: il grafico e l'IRR si aggiornano escludendo quel titolo e i suoi versamenti.
+          </p>
+        </div>
+      )}
+
       {/* Summary table */}
       {!loading && series.length > 0 && (
         <div className="card">
@@ -251,10 +366,20 @@ export default function Benchmark() {
               <thead>
                 <tr className="border-b border-gray-700/50">
                   <th className="text-left py-2 pr-6 text-xs font-medium text-gray-400 uppercase">Nome</th>
-                  <th className="text-right py-2 px-3 text-xs font-medium text-gray-400 uppercase">Periodo</th>
-                  <th className="text-right py-2 px-3 text-xs font-medium text-gray-400 uppercase">Annualizzato</th>
-                  <th className="text-right py-2 px-3 text-xs font-medium text-gray-400 uppercase">Volatilità</th>
-                  <th className="text-right py-2 pl-3 text-xs font-medium text-gray-400 uppercase">Max DD</th>
+                  {mode === 'twr' ? (
+                    <>
+                      <th className="text-right py-2 px-3 text-xs font-medium text-gray-400 uppercase">Periodo</th>
+                      <th className="text-right py-2 px-3 text-xs font-medium text-gray-400 uppercase">Annualizzato</th>
+                      <th className="text-right py-2 px-3 text-xs font-medium text-gray-400 uppercase">Volatilità</th>
+                      <th className="text-right py-2 pl-3 text-xs font-medium text-gray-400 uppercase">Max DD</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="text-right py-2 px-3 text-xs font-medium text-gray-400 uppercase">Guadagno €</th>
+                      <th className="text-right py-2 px-3 text-xs font-medium text-gray-400 uppercase">Rendimento</th>
+                      <th className="text-right py-2 pl-3 text-xs font-medium text-gray-400 uppercase">IRR</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -268,18 +393,34 @@ export default function Benchmark() {
                         </span>
                       </div>
                     </td>
-                    <td className={`py-2.5 px-3 text-right tabular-nums font-semibold ${pnlClass(s.period_return ?? 0)}`}>
-                      {s.period_return != null ? `${s.period_return >= 0 ? '+' : ''}${fmtPct(s.period_return)}` : 'N/D'}
-                    </td>
-                    <td className={`py-2.5 px-3 text-right tabular-nums ${pnlClass(s.annualized_return ?? 0)}`}>
-                      {s.annualized_return != null ? `${s.annualized_return >= 0 ? '+' : ''}${fmtPct(s.annualized_return)}` : 'N/D'}
-                    </td>
-                    <td className="py-2.5 px-3 text-right tabular-nums text-gray-300">
-                      {s.volatility != null ? fmtPct(s.volatility) : 'N/D'}
-                    </td>
-                    <td className="py-2.5 pl-3 text-right tabular-nums text-red-400">
-                      {s.max_drawdown != null ? fmtPct(s.max_drawdown) : 'N/D'}
-                    </td>
+                    {mode === 'twr' ? (
+                      <>
+                        <td className={`py-2.5 px-3 text-right tabular-nums font-semibold ${pnlClass(s.period_return ?? 0)}`}>
+                          {s.period_return != null ? `${s.period_return >= 0 ? '+' : ''}${fmtPct(s.period_return)}` : 'N/D'}
+                        </td>
+                        <td className={`py-2.5 px-3 text-right tabular-nums ${pnlClass(s.annualized_return ?? 0)}`}>
+                          {s.annualized_return != null ? `${s.annualized_return >= 0 ? '+' : ''}${fmtPct(s.annualized_return)}` : 'N/D'}
+                        </td>
+                        <td className="py-2.5 px-3 text-right tabular-nums text-gray-300">
+                          {s.volatility != null ? fmtPct(s.volatility) : 'N/D'}
+                        </td>
+                        <td className="py-2.5 pl-3 text-right tabular-nums text-red-400">
+                          {s.max_drawdown != null ? fmtPct(s.max_drawdown) : 'N/D'}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className={`py-2.5 px-3 text-right tabular-nums font-semibold ${pnlClass(s.gain_eur ?? 0)}`}>
+                          {s.gain_eur != null ? `${pnlSign(s.gain_eur)}${fmtEur(s.gain_eur)}` : 'N/D'}
+                        </td>
+                        <td className={`py-2.5 px-3 text-right tabular-nums ${pnlClass(s.period_return ?? 0)}`}>
+                          {s.period_return != null ? `${s.period_return >= 0 ? '+' : ''}${fmtPct(s.period_return)}` : 'N/D'}
+                        </td>
+                        <td className={`py-2.5 pl-3 text-right tabular-nums ${pnlClass(s.irr ?? 0)}`}>
+                          {s.irr != null ? `${s.irr >= 0 ? '+' : ''}${fmtPct(s.irr)}` : 'N/D'}
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>

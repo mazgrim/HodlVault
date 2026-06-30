@@ -370,9 +370,19 @@ class BenchmarkSeries(BaseModel):
     annualized_return: Optional[float]
     volatility: Optional[float]
     max_drawdown: Optional[float]
+    # Solo in modalità "a versamenti" (money-weighted): guadagno in € sul periodo
+    # e IRR annualizzato. In modalità TWR restano None.
+    gain_eur: Optional[float] = None
+    irr: Optional[float] = None
+
+class BenchmarkHolding(BaseModel):
+    instrument_id: int
+    ticker: str
+    name: str
 
 class BenchmarkChartResponse(BaseModel):
     series: List[BenchmarkSeries]
+    holdings: List[BenchmarkHolding] = []   # titoli del portafoglio (per i checkbox what-if)
 
 
 # ── Admin ─────────────────────────────────────────────────────────────────────

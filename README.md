@@ -108,10 +108,34 @@ L'app è su `http://<ip-server>:3000` (cambia la porta con `PORT` nel `.env`).
 cd /opt/hodlvault && git pull && docker compose up -d --build
 ```
 
-**Backup del database** (SQLite nel volume `hodlvault_hodlvault_data`):
+### Backup & ripristino
+
+I dati da salvare sono due: il **database** (SQLite nel volume Docker, es. `hodlvault_hodlvault_data` — verifica con `docker volume ls`) e il file **`.env`** (non è in git e contiene `SECRET_KEY`). Tutto il resto si recupera da questo repo.
+
+Lo script [`scripts/backup.sh`](scripts/backup.sh) salva entrambi su una cartella a scelta, con rotazione automatica (mantiene gli ultimi `KEEP` backup). Modifica le variabili in cima allo script (`VOLUME`, `REPO_DIR`, `BACKUP_DIR`, `KEEP`), poi:
+
 ```bash
-docker run --rm -v hodlvault_hodlvault_data:/data -v $(pwd):/backup alpine \
-  tar czf /backup/hodlvault-backup-$(date +%Y%m%d).tar.gz /data
+chmod +x scripts/backup.sh
+sudo ./scripts/backup.sh          # Docker richiede privilegi → esegui da root
+```
+
+Schedulazione giornaliera (alle 3:00) nel **crontab di root**, così Docker gira senza richiedere la password:
+
+```bash
+sudo crontab -e
+# aggiungi:
+0 3 * * * /percorso/della/repo/scripts/backup.sh >> /percorso/backup/backup.log 2>&1
+```
+
+> Suggerimento: assicurati che il fuso orario del server sia corretto (`timedatectl`), altrimenti il cron scatta a un'ora diversa da quella attesa.
+
+**Ripristino** (a stack fermo):
+```bash
+docker compose stop backend
+docker run --rm -v hodlvault_hodlvault_data:/data -v /percorso/backup:/backup alpine \
+  sh -c "rm -rf /data/* && tar xzf /backup/hodlvault-backup-AAAAMMGG.tar.gz -C /data"
+cp /percorso/backup/env-AAAAMMGG.bak .env
+docker compose start backend
 ```
 
 <details>

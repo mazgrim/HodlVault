@@ -285,7 +285,7 @@ export default function Dashboard() {
                       <tr key={pos.instrument_id} className="table-row-hover border-b border-gray-700/20">
                         <td className="py-3 pr-4">
                           <Link to={`/instruments/${pos.instrument_id}`} className="group">
-                            <div className="font-semibold text-gray-100 group-hover:text-gold-400 transition-colors truncate max-w-[200px]">{pos.name}</div>
+                            <div className="font-semibold text-gray-100 group-hover:text-gold-400 transition-colors break-words leading-snug max-w-[240px]" title={pos.name}>{pos.name}</div>
                             <div className="text-xs text-gray-500 font-mono mt-0.5">
                               {pos.ticker}{pos.isin ? ` · ${pos.isin}` : ''}
                             </div>

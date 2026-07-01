@@ -4,6 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import KpiCard from '../components/KpiCard'
 import ChangeBadge from '../components/ChangeBadge'
 import InfoHint from '../components/InfoHint'
+import TaxDetailModal from '../components/TaxDetailModal'
 import PortfolioSelector from '../components/PortfolioSelector'
 import { PageSpinner } from '../components/Spinner'
 import { usePortfolios } from '../context/PortfoliosContext'
@@ -79,6 +80,7 @@ export default function Dashboard() {
   const [period, setPeriod] = useState<string>('1Y')
   const [loading, setLoading] = useState(true)
   const [pnlMode, setPnlMode] = useState<'unrealized' | 'realized'>('unrealized')
+  const [showTaxDetail, setShowTaxDetail] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -111,11 +113,19 @@ export default function Dashboard() {
   const bollo = taxValue * BOLLO_RATE
   // Base imponibile = solo le posizioni in plusvalenza (minus non compensate)
   const taxableGain = positions.reduce((s, p) => p.unrealized_pnl > 0 ? s + p.unrealized_pnl : s, 0)
-  const capitalGainTax = positions.reduce((s, p) => {
-    if (p.unrealized_pnl <= 0) return s
+  const taxRows = positions.map((p) => {
     const rate = p.asset_class === 'BOND' ? CG_RATE_BOND : CG_RATE_STD
-    return s + p.unrealized_pnl * rate
-  }, 0)
+    return {
+      instrument_id: p.instrument_id,
+      name: p.name,
+      ticker: p.ticker,
+      market_value: p.market_value,
+      gain: p.unrealized_pnl,
+      rate,
+      tax: p.unrealized_pnl > 0 ? p.unrealized_pnl * rate : 0,
+    }
+  })
+  const capitalGainTax = taxRows.reduce((s, r) => s + r.tax, 0)
   const netLiquidation = taxValue - capitalGainTax
 
   return (
@@ -284,9 +294,17 @@ export default function Dashboard() {
           {/* Tax estimate */}
           {positions.length > 0 && (
             <div className="card">
-              <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-base font-semibold text-gray-200">Tasse (stima)</h2>
-                <InfoHint text="Stima del carico fiscale sul portafoglio attuale. Capital gain: 26% su azioni/ETF, 12,5% su titoli di Stato/obbligazioni white-list, applicato solo alle posizioni in plusvalenza (le minusvalenze non sono compensate). I bond corporate rientrerebbero al 26%. Bollo titoli: 0,2% annuo sul valore. Valori indicativi, non costituiscono consulenza fiscale." />
+              <div className="flex items-center justify-between gap-3 mb-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-semibold text-gray-200">Tasse (stima)</h2>
+                  <InfoHint text="Stima del carico fiscale sul portafoglio attuale. Capital gain: 26% su azioni/ETF, 12,5% su titoli di Stato/obbligazioni white-list, applicato solo alle posizioni in plusvalenza (le minusvalenze non sono compensate). I bond corporate rientrerebbero al 26%. Bollo titoli: 0,2% annuo sul valore. Valori indicativi, non costituiscono consulenza fiscale." />
+                </div>
+                <button
+                  onClick={() => setShowTaxDetail(true)}
+                  className="text-xs text-gold-500 hover:text-gold-400 transition-colors flex-shrink-0"
+                >
+                  Dettaglio per titolo
+                </button>
               </div>
               <p className="text-xs text-gray-500 mb-4">Quanto costa tenere il portafoglio e quanto resterebbe vendendo tutto oggi.</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -367,6 +385,10 @@ export default function Dashboard() {
             )}
           </div>
         </>
+      )}
+
+      {showTaxDetail && (
+        <TaxDetailModal rows={taxRows} onClose={() => setShowTaxDetail(false)} />
       )}
     </div>
   )

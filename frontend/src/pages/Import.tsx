@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Upload, CheckCircle, AlertCircle, FileText, Plus } from 'lucide-react'
+import { Upload, CheckCircle, AlertCircle, FileText, Plus, Info } from 'lucide-react'
 import { usePortfolios } from '../context/PortfoliosContext'
 import { importApi, portfolioApi } from '../api'
 import { fmtDate, fmtNum } from '../utils/format'
@@ -22,6 +22,32 @@ interface ParsedRow {
 interface Preview { total: number; duplicates: number }
 
 const BROKERS = ['Fineco', 'Directa', 'Trade Republic']
+
+// Istruzioni su dove esportare i file, per broker (mostrate in base alla selezione).
+const EXPORT_HELP: Record<string, { title: string; steps: string }[]> = {
+  Fineco: [
+    {
+      title: 'Movimenti conto',
+      steps: 'Sezione Account → movimenti, seleziona il periodo desiderato, poi "Esporta in Excel" (in basso a destra).',
+    },
+    {
+      title: 'Ordini e contabili',
+      steps: 'Sezione Account → menu "Ordini e contabili", seleziona il periodo desiderato, poi "Esporta in Excel" (in basso a sinistra).',
+    },
+  ],
+  'Trade Republic': [
+    {
+      title: 'Estratto conto',
+      steps: 'Nell\'app: account (icona col tuo nome in alto a destra) → Estratti conto → "Esporta operazioni", seleziona il periodo e salva il CSV.',
+    },
+  ],
+  Directa: [
+    {
+      title: 'Movimenti',
+      steps: 'In Directa Libera → sezione Movimenti, seleziona il periodo, poi l\'icona Excel in alto a destra → esporta scegliendo il formato xlsx (consigliato).',
+    },
+  ],
+}
 
 function typeBadge(row: ParsedRow) {
   if (row.is_dividend)
@@ -198,7 +224,7 @@ export default function Import() {
               </select>
             </div>
             <div>
-              <label className="label">File CSV</label>
+              <label className="label">File (CSV o Excel)</label>
               <input
                 ref={fileRef}
                 type="file"
@@ -209,6 +235,27 @@ export default function Import() {
               />
             </div>
           </div>
+
+          {step === 'upload' && EXPORT_HELP[broker] && (
+            <div className="flex items-start gap-2 bg-navy-700/40 border border-gray-600/40 rounded-lg px-3 py-2.5">
+              <Info size={15} className="text-gold-500/80 flex-shrink-0 mt-0.5" />
+              <div className="text-xs text-gray-400 leading-relaxed">
+                <p className="text-gray-300 font-medium mb-1">Dove trovare i file da esportare ({broker})</p>
+                <p className="mb-1">
+                  {EXPORT_HELP[broker].length > 1 ? 'Puoi esportare più tipi di file:' : 'Come esportare il file:'}
+                </p>
+                <ul className="space-y-1">
+                  {EXPORT_HELP[broker].map((m, i) => (
+                    <li key={i}>
+                      <span className="text-gold-400/90 font-medium">
+                        {EXPORT_HELP[broker].length > 1 ? `${i + 1}) ` : ''}{m.title}
+                      </span> — {m.steps}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
 
           {step === 'upload' && (
             <div

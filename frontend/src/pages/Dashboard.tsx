@@ -109,7 +109,8 @@ export default function Dashboard() {
   // ── Stima tasse sul portafoglio attuale ─────────────────────────────────────
   const taxValue = positions.reduce((s, p) => s + p.market_value, 0)
   const bollo = taxValue * BOLLO_RATE
-  // Capital gain solo sulle posizioni in plusvalenza (minus non compensate)
+  // Base imponibile = solo le posizioni in plusvalenza (minus non compensate)
+  const taxableGain = positions.reduce((s, p) => p.unrealized_pnl > 0 ? s + p.unrealized_pnl : s, 0)
   const capitalGainTax = positions.reduce((s, p) => {
     if (p.unrealized_pnl <= 0) return s
     const rate = p.asset_class === 'BOND' ? CG_RATE_BOND : CG_RATE_STD
@@ -295,9 +296,9 @@ export default function Dashboard() {
                   subtitle="0,2% del valore"
                 />
                 <KpiCard
-                  title="Capital gain se vendi oggi"
+                  title="Imposta sul capital gain"
                   value={fmtEur(capitalGainTax)}
-                  subtitle="su plusvalenze non realizzate"
+                  subtitle={`26%/12,5% su ${fmtEur(taxableGain)} di plusvalenze`}
                 />
                 <KpiCard
                   gold

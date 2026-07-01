@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import KpiCard from '../components/KpiCard'
 import ChangeBadge from '../components/ChangeBadge'
+import InfoHint from '../components/InfoHint'
 import PortfolioSelector from '../components/PortfolioSelector'
 import { PageSpinner } from '../components/Spinner'
 import { usePortfolios } from '../context/PortfoliosContext'
@@ -11,6 +12,11 @@ import { fmtEur, fmtPct, fmtNum, fmtDate, fmtAxisEur, pnlClass, pnlSign } from '
 import { useChartTheme } from '../utils/chartTheme'
 
 const PERIODS = ['1G', '1S', '1M', '3M', '6M', 'YTD', '1Y', 'All'] as const
+
+// Stima carico fiscale (Italia)
+const BOLLO_RATE = 0.002     // 0,2% annuo — imposta di bollo su deposito titoli
+const CG_RATE_STD = 0.26     // azioni / ETF / la maggior parte
+const CG_RATE_BOND = 0.125   // titoli di Stato / obbligazioni white-list
 
 function fmtAge(days: number): { value: string; subtitle: string } {
   if (days < 365) {
@@ -99,6 +105,17 @@ export default function Dashboard() {
 
   const chartData = chart.map((p) => ({ date: p.date, valore: p.value }))
   const minVal = chart.length ? Math.min(...chart.map((p) => p.value)) * 0.98 : 0
+
+  // ── Stima tasse sul portafoglio attuale ─────────────────────────────────────
+  const taxValue = positions.reduce((s, p) => s + p.market_value, 0)
+  const bollo = taxValue * BOLLO_RATE
+  // Capital gain solo sulle posizioni in plusvalenza (minus non compensate)
+  const capitalGainTax = positions.reduce((s, p) => {
+    if (p.unrealized_pnl <= 0) return s
+    const rate = p.asset_class === 'BOND' ? CG_RATE_BOND : CG_RATE_STD
+    return s + p.unrealized_pnl * rate
+  }, 0)
+  const netLiquidation = taxValue - capitalGainTax
 
   return (
     <div className="space-y-6">
@@ -262,6 +279,35 @@ export default function Dashboard() {
               </ResponsiveContainer>
             )}
           </div>
+
+          {/* Tax estimate */}
+          {positions.length > 0 && (
+            <div className="card">
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-base font-semibold text-gray-200">Tasse (stima)</h2>
+                <InfoHint text="Stima del carico fiscale sul portafoglio attuale. Capital gain: 26% su azioni/ETF, 12,5% su titoli di Stato/obbligazioni white-list, applicato solo alle posizioni in plusvalenza (le minusvalenze non sono compensate). I bond corporate rientrerebbero al 26%. Bollo titoli: 0,2% annuo sul valore. Valori indicativi, non costituiscono consulenza fiscale." />
+              </div>
+              <p className="text-xs text-gray-500 mb-4">Quanto costa tenere il portafoglio e quanto resterebbe vendendo tutto oggi.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <KpiCard
+                  title="Imposta di bollo (annua)"
+                  value={fmtEur(bollo)}
+                  subtitle="0,2% del valore"
+                />
+                <KpiCard
+                  title="Capital gain se vendi oggi"
+                  value={fmtEur(capitalGainTax)}
+                  subtitle="su plusvalenze non realizzate"
+                />
+                <KpiCard
+                  gold
+                  title="Netto di liquidazione"
+                  value={fmtEur(netLiquidation)}
+                  subtitle={`valore attuale ${fmtEur(taxValue)} − capital gain`}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Positions Table */}
           <div className="card">

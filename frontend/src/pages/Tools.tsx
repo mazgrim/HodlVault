@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { LineChart, Line, BarChart, Bar, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { toolsApi } from '../api'
+import { toolsApi, marketApi } from '../api'
 import { fmtEur, fmtPct, fmtNum } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
-import { Calculator, Flame, BarChart2, TrendingDown } from 'lucide-react'
+import { Calculator, Flame, BarChart2, TrendingDown, Wallet } from 'lucide-react'
 
 const TABS = [
   { id: 'compound',   label: 'Interesse Composto', icon: Calculator },
@@ -138,6 +138,29 @@ function FireTool() {
   // § 4 — Monte Carlo
   const [mcForm, setMcForm] = useState({ avgReturn: 7, volatility: 15, years: 30 })
   const [mcResult, setMcResult] = useState<any>(null)
+
+  // Compila il patrimonio dai dati reali del portafoglio
+  const [pfLoading, setPfLoading] = useState(false)
+  const [pfMsg, setPfMsg] = useState<string | null>(null)
+  const fillFromPortfolio = async () => {
+    setPfLoading(true)
+    setPfMsg(null)
+    try {
+      const res = await marketApi.kpis()
+      const value = Math.round(res.data?.total_value ?? 0)
+      if (value > 0) {
+        setCoastForm(p => ({ ...p, currentAssets: value }))
+        setFirePathForm(p => ({ ...p, currentAssets: value }))
+        setPfMsg(`Patrimonio impostato a ${fmtEur(value)} dal tuo portafoglio.`)
+      } else {
+        setPfMsg('Nessun valore di portafoglio disponibile.')
+      }
+    } catch {
+      setPfMsg('Impossibile leggere il portafoglio.')
+    } finally {
+      setPfLoading(false)
+    }
+  }
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   const monthlyTotal  = expenses.reduce((s, e) => s + (e.amount || 0), 0)
@@ -392,6 +415,18 @@ function FireTool() {
         <p className="text-xs text-gray-600 mb-3">
           Formula: n = log[(FIRE + PMT/r) ÷ (Patrimonio + PMT/r)] ÷ log(1 + r), dove r = rendimento mensile
         </p>
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <button
+            onClick={fillFromPortfolio}
+            disabled={pfLoading}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-gold-500/50 bg-gold-500/15 text-gold-300 hover:bg-gold-500/25 transition-colors disabled:opacity-50"
+            title="Imposta il patrimonio (qui e in Coast FIRE) con il valore attuale del tuo portafoglio"
+          >
+            <Wallet size={14} />
+            {pfLoading ? 'Carico…' : 'Compila con il mio portafoglio'}
+          </button>
+          {pfMsg && <span className="text-xs text-gray-400">{pfMsg}</span>}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           {([
             ['Patrimonio investito (€)',       'currentAssets',  1000],

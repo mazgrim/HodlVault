@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { Receipt, ChevronRight } from 'lucide-react'
 import KpiCard from '../components/KpiCard'
 import ChangeBadge from '../components/ChangeBadge'
 import InfoHint from '../components/InfoHint'
@@ -301,9 +302,11 @@ export default function Dashboard() {
                 </div>
                 <button
                   onClick={() => setShowTaxDetail(true)}
-                  className="text-xs text-gold-500 hover:text-gold-400 transition-colors flex-shrink-0"
+                  className="flex items-center gap-1.5 flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-gold-500/50 bg-gold-500/15 text-gold-300 hover:bg-gold-500/25 transition-colors"
                 >
+                  <Receipt size={14} />
                   Dettaglio per titolo
+                  <ChevronRight size={14} />
                 </button>
               </div>
               <p className="text-xs text-gray-500 mb-4">Quanto costa tenere il portafoglio e quanto resterebbe vendendo tutto oggi.</p>

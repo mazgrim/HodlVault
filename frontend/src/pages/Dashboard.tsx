@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { Receipt, ChevronRight } from 'lucide-react'
 import KpiCard from '../components/KpiCard'
 import ChangeBadge from '../components/ChangeBadge'
+import InfoHint from '../components/InfoHint'
+import TaxDetailModal from '../components/TaxDetailModal'
 import PortfolioSelector from '../components/PortfolioSelector'
 import { PageSpinner } from '../components/Spinner'
 import { usePortfolios } from '../context/PortfoliosContext'
@@ -11,6 +14,11 @@ import { fmtEur, fmtPct, fmtNum, fmtDate, fmtAxisEur, pnlClass, pnlSign } from '
 import { useChartTheme } from '../utils/chartTheme'
 
 const PERIODS = ['1G', '1S', '1M', '3M', '6M', 'YTD', '1Y', 'All'] as const
+
+// Stima carico fiscale (Italia)
+const BOLLO_RATE = 0.002     // 0,2% annuo — imposta di bollo su deposito titoli
+const CG_RATE_STD = 0.26     // azioni / ETF / la maggior parte
+const CG_RATE_BOND = 0.125   // titoli di Stato / obbligazioni white-list
 
 function fmtAge(days: number): { value: string; subtitle: string } {
   if (days < 365) {
@@ -73,6 +81,7 @@ export default function Dashboard() {
   const [period, setPeriod] = useState<string>('1Y')
   const [loading, setLoading] = useState(true)
   const [pnlMode, setPnlMode] = useState<'unrealized' | 'realized'>('unrealized')
+  const [showTaxDetail, setShowTaxDetail] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -99,6 +108,26 @@ export default function Dashboard() {
 
   const chartData = chart.map((p) => ({ date: p.date, valore: p.value }))
   const minVal = chart.length ? Math.min(...chart.map((p) => p.value)) * 0.98 : 0
+
+  // ── Stima tasse sul portafoglio attuale ─────────────────────────────────────
+  const taxValue = positions.reduce((s, p) => s + p.market_value, 0)
+  const bollo = taxValue * BOLLO_RATE
+  // Base imponibile = solo le posizioni in plusvalenza (minus non compensate)
+  const taxableGain = positions.reduce((s, p) => p.unrealized_pnl > 0 ? s + p.unrealized_pnl : s, 0)
+  const taxRows = positions.map((p) => {
+    const rate = p.asset_class === 'BOND' ? CG_RATE_BOND : CG_RATE_STD
+    return {
+      instrument_id: p.instrument_id,
+      name: p.name,
+      ticker: p.ticker,
+      market_value: p.market_value,
+      gain: p.unrealized_pnl,
+      rate,
+      tax: p.unrealized_pnl > 0 ? p.unrealized_pnl * rate : 0,
+    }
+  })
+  const capitalGainTax = taxRows.reduce((s, r) => s + r.tax, 0)
+  const netLiquidation = taxValue - capitalGainTax
 
   return (
     <div className="space-y-6">
@@ -263,6 +292,45 @@ export default function Dashboard() {
             )}
           </div>
 
+          {/* Tax estimate */}
+          {positions.length > 0 && (
+            <div className="card">
+              <div className="flex items-center justify-between gap-3 mb-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-semibold text-gray-200">Tasse (stima)</h2>
+                  <InfoHint text="Stima del carico fiscale sul portafoglio attuale. Capital gain: 26% su azioni/ETF, 12,5% su titoli di Stato/obbligazioni white-list, applicato solo alle posizioni in plusvalenza (le minusvalenze non sono compensate). I bond corporate rientrerebbero al 26%. Bollo titoli: 0,2% annuo sul valore. Valori indicativi, non costituiscono consulenza fiscale." />
+                </div>
+                <button
+                  onClick={() => setShowTaxDetail(true)}
+                  className="flex items-center gap-1.5 flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-gold-500/50 bg-gold-500/15 text-gold-300 hover:bg-gold-500/25 transition-colors"
+                >
+                  <Receipt size={14} />
+                  Dettaglio per titolo
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mb-4">Quanto costa tenere il portafoglio e quanto resterebbe vendendo tutto oggi.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <KpiCard
+                  title="Imposta di bollo (annua)"
+                  value={fmtEur(bollo)}
+                  subtitle="0,2% del valore"
+                />
+                <KpiCard
+                  title="Imposta sul capital gain"
+                  value={fmtEur(capitalGainTax)}
+                  subtitle={`26%/12,5% su ${fmtEur(taxableGain)} di plusvalenze`}
+                />
+                <KpiCard
+                  gold
+                  title="Netto di liquidazione"
+                  value={fmtEur(netLiquidation)}
+                  subtitle={`valore attuale ${fmtEur(taxValue)} − capital gain`}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Positions Table */}
           <div className="card">
             <h2 className="text-base font-semibold text-gray-200 mb-4">Posizioni Aperte</h2>
@@ -320,6 +388,10 @@ export default function Dashboard() {
             )}
           </div>
         </>
+      )}
+
+      {showTaxDetail && (
+        <TaxDetailModal rows={taxRows} onClose={() => setShowTaxDetail(false)} />
       )}
     </div>
   )

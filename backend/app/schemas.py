@@ -131,6 +131,8 @@ class TransactionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 class TransactionUpdate(BaseModel):
+    portfolio_id: Optional[int] = None
+    instrument_id: Optional[int] = None
     type: Optional[TransactionType] = None
     date: Optional[_Date] = None
     quantity: Optional[float] = Field(default=None, gt=0)

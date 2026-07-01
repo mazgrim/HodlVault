@@ -84,7 +84,15 @@ def update_transaction(
     tx = _get_tx(tx_id, current_user.id, db)
     # exclude_unset: only fields actually sent are applied, so an explicit
     # null (e.g. clearing notes) is honoured while omitted fields are untouched.
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    # Moving the transaction to another portfolio / instrument (e.g. correcting
+    # the ticker) is allowed, but validate the targets first.
+    if data.get("portfolio_id") is not None:
+        _check_portfolio_access(data["portfolio_id"], current_user.id, db)
+    if data.get("instrument_id") is not None:
+        if not db.query(models.Instrument).filter(models.Instrument.id == data["instrument_id"]).first():
+            raise HTTPException(status_code=404, detail="Strumento non trovato")
+    for k, v in data.items():
         setattr(tx, k, v)
     try:
         db.commit()

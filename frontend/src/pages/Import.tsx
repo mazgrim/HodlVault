@@ -41,6 +41,12 @@ const EXPORT_HELP: Record<string, { title: string; steps: string }[]> = {
       steps: 'Nell\'app: account (icona col tuo nome in alto a destra) → Estratti conto → "Esporta operazioni", seleziona il periodo e salva il CSV.',
     },
   ],
+  Directa: [
+    {
+      title: 'Movimenti',
+      steps: 'In Directa Libera → sezione Movimenti, seleziona il periodo, poi l\'icona Excel in alto a destra → esporta scegliendo il formato xlsx (consigliato).',
+    },
+  ],
 }
 
 function typeBadge(row: ParsedRow) {
@@ -218,7 +224,7 @@ export default function Import() {
               </select>
             </div>
             <div>
-              <label className="label">File CSV</label>
+              <label className="label">File (CSV o Excel)</label>
               <input
                 ref={fileRef}
                 type="file"

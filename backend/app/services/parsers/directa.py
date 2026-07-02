@@ -6,7 +6,8 @@ Il file ha alcune righe di intestazione, poi una tabella con colonne:
     Descrizione | Quantità | Importo euro | Importo Divisa | Divisa | Riferimento ordine
 
 Si importano solo le righe Acquisto/Vendita; le altre (bolli, conferimenti, …) sono
-ignorate. Directa non riporta un prezzo unitario: prezzo = |Importo euro| / Quantità.
+ignorate. Directa non riporta un prezzo unitario: prezzo = |Importo euro| / Quantità,
+quindi il prezzo è sempre in EUR (currency="EUR", fx_rate=1) anche per titoli esteri.
 Nessuna commissione separata (es. il PAC su ETF è gratuito) → fees = 0.
 """
 import csv
@@ -104,7 +105,10 @@ class DirectaParser:
                 quantity=qty,
                 price=round(importo / qty, 6),     # Directa dà il totale, non il prezzo unitario
                 fees=0.0,
-                currency=_to_str(cell(row, "Divisa")) or "EUR",
+                # Il prezzo deriva da "Importo euro", quindi è SEMPRE in EUR: usare la
+                # colonna "Divisa" (valuta del titolo) farebbe dividere un prezzo già
+                # in EUR per il cambio, sbagliando i valori dei titoli esteri.
+                currency="EUR",
             ))
         return result
 

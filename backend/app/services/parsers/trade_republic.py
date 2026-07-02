@@ -150,7 +150,15 @@ class TradeRepublicParser:
             if not qty or qty <= 0:
                 return None
 
-            price = (abs(amount) - abs(fee)) / qty
+            # 'amount' è il movimento di cassa contabilizzato: per un BUY include la
+            # fee (addebito totale), per una SELL è già al netto della fee. Il prezzo
+            # "pulito" quindi si ottiene togliendo la fee sul BUY e riaggiungendola
+            # sulla SELL — il calcolatore poi fa costo = prezzo·qta + fee e
+            # proventi = prezzo·qta − fee, ricostruendo esattamente la cassa reale.
+            if trade_type == TransactionType.BUY:
+                price = (abs(amount) - abs(fee)) / qty
+            else:
+                price = (abs(amount) + abs(fee)) / qty
             return ParsedTransaction(
                 date=tx_date,
                 type=trade_type,

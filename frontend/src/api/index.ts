@@ -135,7 +135,6 @@ export const demoApi = {
 // ── Tools ─────────────────────────────────────────────────────────────────────
 export const toolsApi = {
   compound: (data: object) => api.post('/tools/compound', data),
-  fire: (data: object) => api.post('/tools/fire', data),
   pacVsLumpsum: (data: object) => api.post('/tools/pac-vs-lumpsum', data),
   inflation: (data: object) => api.post('/tools/inflation', data),
 }

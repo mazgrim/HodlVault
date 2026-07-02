@@ -80,7 +80,7 @@ backend/app/
 
 ### Database
 
-SQLite stored in a Docker volume (`/data/hodlvault.db`). Tables are created via `Base.metadata.create_all` on startup — **there are no Alembic migrations** despite `alembic` being in `requirements.txt`. Schema changes require manual migration or a DB reset.
+SQLite stored in a Docker volume (`/data/hodlvault.db`). Tables are created via `Base.metadata.create_all` on startup — **there are no Alembic migrations**. Schema changes require manual migration or a DB reset.
 
 Key tables: `users`, `portfolios`, `instruments`, `transactions`, `dividend_events`, `price_history`, `fx_rates`.
 
@@ -88,7 +88,7 @@ Key tables: `users`, `portfolios`, `instruments`, `transactions`, `dividend_even
 
 ### Market data
 
-**yfinance is NOT used at runtime** despite being listed in `requirements.txt`. `MarketService` (`services/market.py`) calls the Yahoo Finance chart API directly via `httpx` (`query1.finance.yahoo.com/v8/finance/chart/{ticker}`, with fallback to `query2`). This is intentional — the yfinance Python library had issues in this environment.
+**The yfinance library is NOT a dependency.** `MarketService` (`services/market.py`) calls the Yahoo Finance chart API directly via `httpx` (`query1.finance.yahoo.com/v8/finance/chart/{ticker}`, with fallback to `query2`). This is intentional — the yfinance Python library had issues in this environment.
 
 Prices are refreshed nightly via APScheduler (default 18:00, configurable via `PRICE_UPDATE_HOUR`). The sidebar "Aggiorna prezzi" button calls `POST /api/market/refresh` to force an immediate refresh.
 

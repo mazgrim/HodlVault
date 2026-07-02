@@ -234,3 +234,14 @@ HodlVault/
 - **Database**: SQLite, in un volume Docker. Le tabelle vengono create all'avvio; non ci sono migrazioni automatiche, quindi un cambio di schema può richiedere un reset del DB.
 - **Sicurezza**: i token JWT (access + refresh) sono salvati nel browser; il login ha un blocco automatico dopo troppi tentativi falliti e un registro accessi consultabile dall'admin.
 - **Dimensionamento**: ottimizzato per uso personale (~10 utenti, ~10.000 transazioni).
+
+---
+
+## Licenza
+
+Rilasciato sotto [licenza MIT](LICENSE): puoi usare, modificare e ridistribuire
+liberamente questo software, mantenendo la nota di copyright.
+
+> **Disclaimer**: HodlVault è uno strumento di tracciamento personale. I calcoli
+> fiscali (imposta sostitutiva, ritenute estere) sono **stime indicative** e non
+> costituiscono consulenza fiscale o finanziaria.

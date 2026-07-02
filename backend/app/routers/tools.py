@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List
-import math
 
 router = APIRouter()
 
@@ -64,58 +63,6 @@ def compound_interest(data: CompoundInput):
         total_invested=round(invested, 2),
         total_gains=round(value - invested, 2),
         real_final_value=round(real_final, 2),
-        rows=rows,
-    )
-
-
-# ── FIRE Calculator ───────────────────────────────────────────────────────────
-
-class FireInput(BaseModel):
-    annual_expenses: float
-    current_wealth: float
-    annual_savings: float
-    expected_return_pct: float = 7.0
-    swr_pct: float = 4.0
-    inflation_pct: float = 2.0
-
-class FireYearRow(BaseModel):
-    year: int
-    wealth: float
-    target: float
-
-class FireResult(BaseModel):
-    fire_target: float
-    years_to_fire: int
-    projected_year: int
-    rows: List[FireYearRow]
-
-
-@router.post("/fire", response_model=FireResult)
-def fire_calculator(data: FireInput):
-    from datetime import datetime
-    real_return = (1 + data.expected_return_pct / 100) / (1 + data.inflation_pct / 100) - 1
-    fire_target = data.annual_expenses / (data.swr_pct / 100)
-    wealth = data.current_wealth
-    rows = []
-    current_year = datetime.now().year
-
-    for year in range(1, 101):
-        wealth = wealth * (1 + real_return) + data.annual_savings
-        # Inflate target
-        inflated_target = fire_target * ((1 + data.inflation_pct / 100) ** year)
-        rows.append(FireYearRow(year=year, wealth=round(wealth, 2), target=round(inflated_target, 2)))
-        if wealth >= inflated_target:
-            return FireResult(
-                fire_target=round(fire_target, 2),
-                years_to_fire=year,
-                projected_year=current_year + year,
-                rows=rows,
-            )
-
-    return FireResult(
-        fire_target=round(fire_target, 2),
-        years_to_fire=100,
-        projected_year=current_year + 100,
         rows=rows,
     )
 

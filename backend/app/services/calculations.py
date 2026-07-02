@@ -1026,24 +1026,25 @@ class DividendCalculator:
         if not events:
             return []
 
-        # Group by instrument and infer frequency
-        by_inst: Dict[int, List[date]] = defaultdict(list)
-        amounts: Dict[int, List[float]] = defaultdict(list)
+        # Group by instrument, aggregating per ex-date: the same instrument held in
+        # several portfolios yields multiple events on the same date — they are one
+        # payment (summed), not a shorter payout cadence.
+        by_inst: Dict[int, Dict[date, float]] = defaultdict(lambda: defaultdict(float))
         for ev in events:
-            by_inst[ev.instrument_id].append(ev.date)
-            amounts[ev.instrument_id].append(ev.amount / (ev.fx_rate or 1.0))
+            by_inst[ev.instrument_id][ev.date] += ev.amount / (ev.fx_rate or 1.0)
 
         projections: Dict[str, float] = defaultdict(float)
         today = date.today()
 
-        for iid, dates in by_inst.items():
-            if len(dates) < 2:
+        for iid, per_date in by_inst.items():
+            if len(per_date) < 2:
                 continue
-            dates_sorted = sorted(dates)
-            # Infer average interval
+            dates_sorted = sorted(per_date)
+            # Infer average interval; the 1-day floor keeps the projection loop
+            # advancing even on degenerate data (e.g. consecutive-day events).
             gaps = [(dates_sorted[i] - dates_sorted[i - 1]).days for i in range(1, len(dates_sorted))]
-            avg_gap = sum(gaps) / len(gaps)
-            avg_amount = sum(amounts[iid]) / len(amounts[iid])
+            avg_gap = max(sum(gaps) / len(gaps), 1.0)
+            avg_amount = sum(per_date.values()) / len(per_date)
             last_date = dates_sorted[-1]
 
             # Project forward 12 months

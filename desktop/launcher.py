@@ -73,6 +73,27 @@ def _prepare_env() -> None:
         os.environ["SECRET_KEY"] = _load_or_create_secret()
 
 
+def _redirect_std_streams() -> None:
+    """
+    Nelle build windowed (console=False) sys.stdout/stderr sono None: qualsiasi
+    logging (o l'isatty() di uvicorn) va in crash. Li reindirizziamo a un file di
+    log nella cartella dati — così l'app parte e abbiamo i log per il debug.
+    """
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        from app.data_dir import get_data_dir
+        log_path = get_data_dir() / "desktop.log"
+        f = open(log_path, "a", encoding="utf-8", buffering=1)
+    except Exception:
+        import io
+        f = io.StringIO()  # ultima spiaggia: evita comunque il None
+    if sys.stdout is None:
+        sys.stdout = f
+    if sys.stderr is None:
+        sys.stderr = f
+
+
 def free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
@@ -114,6 +135,7 @@ def wait_healthy(port: int, timeout: float = 30.0) -> bool:
 def main() -> int:
     _bootstrap_paths()
     _prepare_env()
+    _redirect_std_streams()  # PRIMA di importare/avviare uvicorn (che tocca stdout)
 
     port = free_port()
     server = start_server(port)

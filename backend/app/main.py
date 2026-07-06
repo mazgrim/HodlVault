@@ -54,6 +54,12 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info(f"Scheduler started – price update at {price_hour}:00 daily.")
 
+    # Refresh prezzi all'avvio (in background, non blocca l'app). Utile all'app
+    # desktop, che potrebbe non essere mai in esecuzione all'orario dello
+    # scheduler. Disattivato di default: il launcher lo abilita in desktop mode.
+    if os.getenv("REFRESH_ON_STARTUP", "").strip().lower() in ("1", "true", "yes", "on"):
+        asyncio.create_task(_startup_price_refresh())
+
     yield
 
     scheduler.shutdown(wait=False)
@@ -79,6 +85,19 @@ async def _nightly_price_update():
         svc = MarketService(db)
         await svc.refresh_all_prices()
         logger.info("Nightly price update complete.")
+    finally:
+        db.close()
+
+
+async def _startup_price_refresh():
+    from .database import SessionLocal
+    from .services.market import MarketService
+    db = SessionLocal()
+    try:
+        await MarketService(db).refresh_all_prices()
+        logger.info("Startup price refresh complete.")
+    except Exception as exc:
+        logger.warning(f"Startup price refresh failed: {exc}")
     finally:
         db.close()
 

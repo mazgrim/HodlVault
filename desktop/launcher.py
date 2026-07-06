@@ -66,6 +66,9 @@ def _prepare_env() -> None:
     os.environ.setdefault("DESKTOP_MODE", "1")
     # APP_ENV non 'production': niente requisiti web (CORS, ecc.)
     os.environ.setdefault("APP_ENV", "desktop")
+    # L'app desktop può non essere accesa all'orario dello scheduler notturno →
+    # aggiorna i prezzi all'avvio (in background).
+    os.environ.setdefault("REFRESH_ON_STARTUP", "1")
     if not os.getenv("SECRET_KEY"):
         os.environ["SECRET_KEY"] = _load_or_create_secret()
 

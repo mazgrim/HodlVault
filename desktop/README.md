@@ -27,6 +27,12 @@ Il DB SQLite (`hodlvault.db`), i backup pre-migrazione (`backups/`) e `secret.ke
 stanno tutti lì. Per spostare i dati fra installazioni usa Backup → Esporta/Importa
 (formato JSON versionato).
 
+## Aggiornamento prezzi
+Lo scheduler notturno (18:00) non gira ad app chiusa, quindi in desktop mode il
+launcher imposta `REFRESH_ON_STARTUP=1`: all'avvio i prezzi vengono aggiornati in
+background (non blocca la UI). Resta disponibile il pulsante "Aggiorna prezzi".
+In Docker/web l'env è assente → nessun refresh all'avvio.
+
 ## Migrazioni schema
 All'avvio `migrations.run_migrations` porta il DB all'ultima versione. Ogni
 migrazione è **atomica** (rollback totale se fallisce) e prima di applicarle a un

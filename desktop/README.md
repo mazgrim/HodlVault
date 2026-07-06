@@ -5,6 +5,10 @@ l'interfaccia mentre il backend FastAPI gira in locale su una porta effimera.
 Stesso codice di Docker/web — cambia solo il modo di avviare e impacchettare.
 
 ## Come funziona
+Al **primo avvio** l'app chiede solo un nome utente (nessuna password) e crea il
+profilo locale; agli avvii successivi entra da sola. Essendo single-user, le
+funzioni di amministrazione sono nascoste.
+
 `launcher.py`:
 1. imposta `DESKTOP_MODE=1` (login passwordless single-user) e una `SECRET_KEY`
    stabile persistita nella cartella dati;

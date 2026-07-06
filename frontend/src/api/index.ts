@@ -9,6 +9,7 @@ export const authApi = {
   me: () => api.get('/auth/me'),
   config: () => api.get('/auth/config'),
   desktopLogin: () => api.post('/auth/desktop-login'),
+  desktopSetup: (username: string) => api.post('/auth/desktop-setup', { username }),
   refresh: (refresh_token: string) =>
     api.post('/auth/refresh', { refresh_token }),
   changePassword: (old_password: string, new_password: string) =>

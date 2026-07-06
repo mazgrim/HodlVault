@@ -27,8 +27,10 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, logout, isDemo } = useAuth()
+  const { user, logout, isDemo, desktopMode } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  // In desktop mode (single-user) le funzioni admin non hanno senso: nascoste.
+  const showAdmin = !!user?.is_admin && !desktopMode
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -52,11 +54,11 @@ export default function Layout({ children }: LayoutProps) {
 
   // Admin notification: count of pending password-reset requests for the badge.
   useEffect(() => {
-    if (!user?.is_admin) { setPendingResets(0); return }
+    if (!showAdmin) { setPendingResets(0); return }
     adminApi.passwordRequests()
       .then((r) => setPendingResets(r.data.length))
       .catch(() => {})
-  }, [user?.is_admin])
+  }, [showAdmin])
 
   // Foreground progress bar + percentage badge for the market-data actions, so the
   // user sees that something is happening even when the request is near-instant.
@@ -164,7 +166,7 @@ export default function Layout({ children }: LayoutProps) {
         </button>
         {collapsed ? (
           <>
-            {user?.is_admin && (
+            {showAdmin && (
               <NavLink
                 to="/admin" onClick={() => setMobileOpen(false)} title="Amministrazione"
                 className={({ isActive }) =>
@@ -196,7 +198,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className="relative" data-account-menu>
             {accountOpen && (
               <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg bg-navy-700 border border-gray-700/60 shadow-xl py-1 z-20">
-                {user?.is_admin && (
+                {showAdmin && (
                   <NavLink
                     to="/admin" onClick={() => { setAccountOpen(false); setMobileOpen(false) }}
                     className={({ isActive }) =>

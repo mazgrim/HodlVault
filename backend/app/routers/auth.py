@@ -19,12 +19,55 @@ DESKTOP_USER = os.getenv("DESKTOP_USER", "local")
 
 
 @router.get("/config", response_model=schemas.AuthConfig)
-def auth_config():
+def auth_config(db: Session = Depends(get_db)):
     """Config pubblica: consente al frontend di sapere se è in modalità desktop
-    (auto-login) e se la registrazione è aperta, prima di autenticarsi."""
+    (auto-login), se serve il setup iniziale del nome utente, e se la
+    registrazione è aperta, prima di autenticarsi."""
+    dm = desktop_mode()
+    needs_setup = dm and db.query(models.User).count() == 0
     return schemas.AuthConfig(
-        desktop_mode=desktop_mode(),
+        desktop_mode=dm,
         registration_open=os.getenv("REGISTRATION_OPEN", "true").lower() == "true",
+        needs_setup=needs_setup,
+    )
+
+
+def _new_local_user(username: str, db: Session) -> models.User:
+    """Crea l'utente locale unico (single-user desktop, senza ruolo admin)."""
+    import secrets
+    user = models.User(
+        username=username,
+        email=f"{username}@localhost",
+        hashed_password=hash_password(secrets.token_urlsafe(24)),
+        is_admin=False,   # single-user: nessuna funzione admin
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.post("/desktop-setup", response_model=schemas.Token)
+def desktop_setup(body: schemas.DesktopSetup, db: Session = Depends(get_db)):
+    """
+    Primo avvio dell'app desktop: crea l'utente locale con il nome scelto e
+    autentica. Solo in DESKTOP_MODE e solo se non esiste ancora alcun utente.
+    """
+    if not desktop_mode():
+        raise HTTPException(status_code=404, detail="Not found")
+    if db.query(models.User).count() > 0:
+        raise HTTPException(status_code=409, detail="Setup già completato")
+
+    username = (body.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Nome utente richiesto")
+    if db.query(models.User).filter(models.User.username == username).first():
+        raise HTTPException(status_code=400, detail="Nome utente già in uso")
+
+    user = _new_local_user(username, db)
+    return schemas.Token(
+        access_token=create_access_token({"sub": str(user.id)}),
+        refresh_token=create_refresh_token({"sub": str(user.id)}),
     )
 
 
@@ -35,27 +78,18 @@ def desktop_login(db: Session = Depends(get_db)):
     DESKTOP_MODE attivo** (impostato dal launcher): fuori da quel contesto
     risponde 404, così un'istanza web non offre mai accesso senza password.
 
-    Usa (creandolo al primo avvio) l'utente locale unico.
+    Usa l'utente locale esistente; come fallback (DB senza utenti) crea "local".
+    Il primo avvio normale passa invece da /desktop-setup (nome scelto).
     """
     if not desktop_mode():
         raise HTTPException(status_code=404, detail="Not found")
 
     user = db.query(models.User).filter(models.User.username == DESKTOP_USER).first()
     if user is None:
-        # Se esiste già un altro utente (DB importato/migrato), riusa il primo;
-        # altrimenti crea l'utente locale proprietario.
+        # Se esiste già un altro utente (DB importato/migrato), riusa il primo.
         user = db.query(models.User).order_by(models.User.id).first()
     if user is None:
-        import secrets
-        user = models.User(
-            username=DESKTOP_USER,
-            email=f"{DESKTOP_USER}@localhost",
-            hashed_password=hash_password(secrets.token_urlsafe(24)),
-            is_admin=True,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        user = _new_local_user(DESKTOP_USER, db)
 
     return schemas.Token(
         access_token=create_access_token({"sub": str(user.id)}),

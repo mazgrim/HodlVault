@@ -40,6 +40,10 @@ class AuthConfig(BaseModel):
     """Config pubblica letta dal frontend all'avvio (prima del login)."""
     desktop_mode: bool
     registration_open: bool
+    needs_setup: bool = False   # desktop: primo avvio, nessun utente ancora creato
+
+class DesktopSetup(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
 
 class TokenRefresh(BaseModel):
     refresh_token: str

@@ -8,6 +8,7 @@ import Performance from './pages/Performance'
 import Analysis from './pages/Analysis'
 import Dividends from './pages/Dividends'
 import Import from './pages/Import'
+import DesktopSetup from './pages/DesktopSetup'
 import Tools from './pages/Tools'
 import Admin from './pages/Admin'
 import Transactions from './pages/Transactions'
@@ -28,6 +29,15 @@ function App() {
       <div className="flex items-center justify-center h-screen bg-navy-900">
         <PageSpinner />
       </div>
+    )
+  }
+
+  // Primo avvio dell'app desktop: scelta del nome utente prima di tutto.
+  if (auth.needsSetup) {
+    return (
+      <AuthContext.Provider value={auth}>
+        <DesktopSetup />
+      </AuthContext.Provider>
     )
   }
 

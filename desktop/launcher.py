@@ -83,7 +83,12 @@ def start_server(port: int):
     import uvicorn
     from app.main import app  # import dopo _prepare_env
 
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+    # Implementazioni fisse (h11 / asyncio, niente websockets): deterministico e
+    # con meno import dinamici da impacchettare in PyInstaller.
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=port, log_level="warning",
+        loop="asyncio", http="h11", ws="none",
+    )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()

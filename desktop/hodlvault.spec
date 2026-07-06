@@ -25,7 +25,9 @@ if not os.path.isdir(FRONTEND_DIST):
 hiddenimports = []
 for pkg in ("uvicorn", "apscheduler", "app"):
     hiddenimports += collect_submodules(pkg)
-hiddenimports += ["email_validator"]
+# h11: implementazione HTTP usata da uvicorn (import dinamico); email_validator:
+# usato da pydantic EmailStr. Entrambi vanno dichiarati esplicitamente.
+hiddenimports += ["h11", "email_validator"]
 
 datas = [(FRONTEND_DIST, "frontend")]
 binaries = []

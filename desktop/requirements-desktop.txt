@@ -1,0 +1,13 @@
+# Dipendenze SOLO per costruire/eseguire le build desktop.
+# NON usate dal deploy Docker (che resta su backend/requirements.txt).
+# Nell'ambiente di build installa: backend/requirements.txt + questo file.
+#
+#   pip install -r backend/requirements.txt -r desktop/requirements-desktop.txt
+#
+# Nota pywebview su Linux: richiede un runtime GUI di sistema (GTK+WebKit2GTK
+# oppure Qt/QtWebEngine). Es. Debian/Ubuntu:
+#   sudo apt install python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0
+# Su Windows usa il runtime Edge WebView2 (di norma già presente su Win10/11).
+
+pywebview==5.1
+pyinstaller==6.10.0

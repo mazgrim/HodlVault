@@ -23,6 +23,11 @@ data/
 # Docker
 .docker/
 
+# Desktop build (PyInstaller / AppImage)
+/build/
+*.AppDir/
+*.AppImage
+
 # OS
 .DS_Store
 Thumbs.db

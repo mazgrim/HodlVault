@@ -2,7 +2,11 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/hodlvault.db")
+from .data_dir import get_database_url
+
+# Docker imposta DATABASE_URL esplicitamente → resta invariato. Altrimenti il
+# percorso è risolto da data_dir (dev: ./data, desktop: portable/AppData/XDG).
+DATABASE_URL = os.getenv("DATABASE_URL") or get_database_url()
 
 # SQLite: allow same thread=False for FastAPI
 engine = create_engine(

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, PieChart, Landmark,
   Upload, Wrench, LogOut, ChevronLeft, ChevronRight,
   Users, RefreshCw, History, Menu, ArrowLeftRight, BarChart2,
-  Sun, Moon, KeyRound, User, ChevronUp, ChevronDown,
+  Sun, Moon, KeyRound, User, ChevronUp, ChevronDown, DatabaseBackup,
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
@@ -19,6 +19,7 @@ const NAV = [
   { to: '/dividends',     icon: Landmark,        label: 'Dividendi' },
   { to: '/transactions',  icon: ArrowLeftRight,  label: 'Transazioni' },
   { to: '/import',        icon: Upload,          label: 'Importa' },
+  { to: '/backup',        icon: DatabaseBackup,  label: 'Backup' },
   { to: '/tools',         icon: Wrench,          label: 'Tools' },
 ]
 

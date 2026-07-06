@@ -99,6 +99,23 @@ export const importApi = {
   confirm: (data: object) => api.post('/import/confirm', data),
 }
 
+// ── Backup / Ripristino ─────────────────────────────────────────────────────
+export const backupApi = {
+  exportJson: () => api.get('/backup/export', { responseType: 'blob' }),
+  exportXlsx: () => api.get('/backup/export.xlsx', { responseType: 'blob' }),
+  exportCsv: () => api.get('/backup/export.csv', { responseType: 'blob' }),
+  importPreview: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post('/backup/import/preview', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  importConfirm: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post('/backup/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+}
+
 // ── Admin ─────────────────────────────────────────────────────────────────────
 export const adminApi = {
   users: () => api.get('/admin/users'),

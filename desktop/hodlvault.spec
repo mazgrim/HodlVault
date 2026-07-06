@@ -2,17 +2,21 @@
 """
 Spec PyInstaller per l'app desktop HodlVault (onefile).
 
-Va lanciato dalla RADICE del repo, dopo aver buildato il frontend:
-    cd frontend && npm ci && npm run build && cd ..
+Dopo aver buildato il frontend (npm run build), lanciare da qualunque cwd:
     pyinstaller desktop/hodlvault.spec
 
 Produce dist/HodlVault(.exe su Windows). Il frontend buildato viene incluso come
 dati e servito dal backend (frontend_static risolve `<_MEIPASS>/frontend`).
+
+NB: PyInstaller risolve i path relativi rispetto alla cartella dello spec, quindi
+qui tutto è basato su SPECPATH (dir dello spec, fornita da PyInstaller) per
+funzionare indipendentemente dalla directory di lancio.
 """
 import os
 from PyInstaller.utils.hooks import collect_submodules, collect_all
 
-ROOT = os.path.abspath(os.getcwd())
+SPEC_DIR = SPECPATH                       # .../HodlVault/desktop (iniettata da PyInstaller)
+ROOT = os.path.dirname(SPEC_DIR)          # radice del repo
 BACKEND = os.path.join(ROOT, "backend")
 FRONTEND_DIST = os.path.join(ROOT, "frontend", "dist")
 
@@ -38,12 +42,12 @@ datas += _web_datas
 binaries += _web_bins
 hiddenimports += _web_hidden
 
-_icon_ico = os.path.join("desktop", "icon.ico")
-_icon_png = os.path.join("desktop", "icon.png")
+_icon_ico = os.path.join(SPEC_DIR, "icon.ico")
+_icon_png = os.path.join(SPEC_DIR, "icon.png")
 icon = _icon_ico if os.path.exists(_icon_ico) else (_icon_png if os.path.exists(_icon_png) else None)
 
 a = Analysis(
-    [os.path.join("desktop", "launcher.py")],
+    [os.path.join(SPEC_DIR, "launcher.py")],
     pathex=[BACKEND],
     binaries=binaries,
     datas=datas,

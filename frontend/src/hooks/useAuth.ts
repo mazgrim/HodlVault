@@ -40,7 +40,21 @@ export function useAuthProvider(): AuthCtx {
         })
         .finally(() => setLoading(false))
     } else {
-      setLoading(false)
+      // Nessun token: in modalità desktop (app single-user) l'utente non deve
+      // fare login → auto-login passwordless. Altrimenti si mostra la pagina di
+      // login come sempre.
+      authApi.config()
+        .then(async (r) => {
+          if (r.data?.desktop_mode) {
+            const res = await authApi.desktopLogin()
+            localStorage.setItem('access_token', res.data.access_token)
+            localStorage.setItem('refresh_token', res.data.refresh_token)
+            const me = await authApi.me()
+            setUser(me.data)
+          }
+        })
+        .catch(() => { /* config non raggiungibile: resta sulla login */ })
+        .finally(() => setLoading(false))
     }
   }, [])
 

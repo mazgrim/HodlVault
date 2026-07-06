@@ -7,6 +7,8 @@ export const authApi = {
   register: (username: string, email: string, password: string) =>
     api.post('/auth/register', { username, email, password }),
   me: () => api.get('/auth/me'),
+  config: () => api.get('/auth/config'),
+  desktopLogin: () => api.post('/auth/desktop-login'),
   refresh: (refresh_token: string) =>
     api.post('/auth/refresh', { refresh_token }),
   changePassword: (old_password: string, new_password: string) =>

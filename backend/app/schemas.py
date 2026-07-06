@@ -36,6 +36,11 @@ class Token(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
 
+class AuthConfig(BaseModel):
+    """Config pubblica letta dal frontend all'avvio (prima del login)."""
+    desktop_mode: bool
+    registration_open: bool
+
 class TokenRefresh(BaseModel):
     refresh_token: str
 

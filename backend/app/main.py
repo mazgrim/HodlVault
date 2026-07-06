@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .database import engine, Base
 from .migrations import run_migrations
+from .frontend_static import mount_frontend
 from .routers import auth, portfolio, transactions, performance, dividends, import_data, market_data, admin, tools, benchmark, demo
 
 logging.basicConfig(level=logging.INFO)
@@ -123,3 +124,8 @@ app.include_router(demo.router,         prefix="/api/demo",        tags=["Demo"]
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "app": "HodlVault"}
+
+
+# Frontend statico (solo se presente una build: bundle desktop). Va montato per
+# ultimo perché registra un catch-all SPA. In Docker/dev non fa nulla.
+mount_frontend(app)

@@ -30,8 +30,11 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const { user, logout, isDemo, desktopMode } = useAuth()
   const { theme, toggleTheme } = useTheme()
-  // In desktop mode (single-user) le funzioni admin non hanno senso: nascoste.
+  // In desktop mode (single-user, passwordless) admin / cambio password / logout
+  // non hanno senso: nascosti.
   const showAdmin = !!user?.is_admin && !desktopMode
+  const showChangePassword = !isDemo && !desktopMode
+  const showLogout = !desktopMode
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -180,7 +183,7 @@ export default function Layout({ children }: LayoutProps) {
                 {pendingResets > 0 && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />}
               </NavLink>
             )}
-            {!isDemo && (
+            {showChangePassword && (
               <button onClick={() => setShowChangePw(true)} title="Cambia password"
                 className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-gold-400 hover:bg-navy-700/60 transition-all w-full">
                 <KeyRound size={18} />
@@ -190,10 +193,12 @@ export default function Layout({ children }: LayoutProps) {
               className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-gold-400 hover:bg-navy-700/60 transition-all w-full">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button onClick={logout} title="Esci"
-              className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-all w-full">
-              <LogOut size={18} />
-            </button>
+            {showLogout && (
+              <button onClick={logout} title="Esci"
+                className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-all w-full">
+                <LogOut size={18} />
+              </button>
+            )}
           </>
         ) : (
           <div className="relative" data-account-menu>
@@ -217,7 +222,7 @@ export default function Layout({ children }: LayoutProps) {
                     )}
                   </NavLink>
                 )}
-                {!isDemo && (
+                {showChangePassword && (
                   <button onClick={() => { setAccountOpen(false); setShowChangePw(true) }}
                     className="flex items-center gap-3 px-3 py-2 text-sm w-full text-gray-300 hover:text-gold-400 hover:bg-navy-600/60 transition-colors">
                     <KeyRound size={16} className="flex-shrink-0" />
@@ -229,11 +234,13 @@ export default function Layout({ children }: LayoutProps) {
                   {theme === 'dark' ? <Sun size={16} className="flex-shrink-0" /> : <Moon size={16} className="flex-shrink-0" />}
                   <span>{theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}</span>
                 </button>
-                <button onClick={() => { setAccountOpen(false); logout() }}
-                  className="flex items-center gap-3 px-3 py-2 text-sm w-full text-gray-300 hover:text-red-400 hover:bg-red-900/20 transition-colors">
-                  <LogOut size={16} className="flex-shrink-0" />
-                  <span>Esci</span>
-                </button>
+                {showLogout && (
+                  <button onClick={() => { setAccountOpen(false); logout() }}
+                    className="flex items-center gap-3 px-3 py-2 text-sm w-full text-gray-300 hover:text-red-400 hover:bg-red-900/20 transition-colors">
+                    <LogOut size={16} className="flex-shrink-0" />
+                    <span>Esci</span>
+                  </button>
+                )}
               </div>
             )}
             <button onClick={() => setAccountOpen((o) => !o)}

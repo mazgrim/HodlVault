@@ -24,14 +24,15 @@ import logging
 import zipfile
 from datetime import datetime, date
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from openpyxl import Workbook
 
-from ..database import get_db
+from ..database import get_db, SessionLocal
 from .. import models, schemas
 from ..auth import get_current_user, require_write
 
@@ -390,13 +391,16 @@ def _do_import(data: dict, user: models.User, db: Session, dry_run: bool):
         "dividends_skipped": 0,
         "errors": [],
     }
+    touched_instruments: set[int] = set()   # per il fetch prezzi post-import
 
     # Pre-crea gli strumenti dal blocco `instruments` (metadati completi).
     for spec in data.get("instruments", []):
         existing = _instrument_lookup(spec, db)
         inst = _get_or_create_instrument(spec, db)
-        if inst is not None and existing is None:
-            result["instruments_created"] += 1
+        if inst is not None:
+            touched_instruments.add(inst.id)
+            if existing is None:
+                result["instruments_created"] += 1
 
     existing_pf = {p.name: p for p in _user_portfolios(user, db)}
 
@@ -424,6 +428,7 @@ def _do_import(data: dict, user: models.User, db: Session, dry_run: bool):
             if d is None or inst is None:
                 result["transactions_skipped"] += 1
                 continue
+            touched_instruments.add(inst.id)
             try:
                 ttype = models.TransactionType(tr.get("type"))
             except ValueError:
@@ -455,6 +460,7 @@ def _do_import(data: dict, user: models.User, db: Session, dry_run: bool):
             if d is None or inst is None:
                 result["dividends_skipped"] += 1
                 continue
+            touched_instruments.add(inst.id)
             try:
                 dtype = models.DividendType(dv.get("type") or "DIVIDEND")
             except ValueError:
@@ -484,6 +490,7 @@ def _do_import(data: dict, user: models.User, db: Session, dry_run: bool):
         db.rollback()
     else:
         db.commit()
+    result["instrument_ids"] = sorted(touched_instruments)
     return result
 
 
@@ -496,11 +503,14 @@ async def import_preview(
     """Dry-run: mostra cosa verrebbe importato senza scrivere nulla."""
     content = await file.read()
     data = _parse_backup_upload(content)
-    return _do_import(data, current_user, db, dry_run=True)
+    result = _do_import(data, current_user, db, dry_run=True)
+    result.pop("instrument_ids", None)
+    return result
 
 
 @router.post("/import")
 async def import_confirm(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_write),
@@ -508,4 +518,45 @@ async def import_confirm(
     """Merge idempotente del backup nell'account dell'utente corrente."""
     content = await file.read()
     data = _parse_backup_upload(content)
-    return _do_import(data, current_user, db, dry_run=False)
+    result = _do_import(data, current_user, db, dry_run=False)
+
+    # Il backup non contiene prezzi/FX (si ri-scaricano da Yahoo). Senza questo
+    # fetch, dopo l'import la dashboard mostrerebbe valori di mercato errati fino
+    # al prossimo refresh. Rifà prezzi/FX in background (non blocca la risposta).
+    ids = result.pop("instrument_ids", [])
+    imported_any = (
+        result["transactions_imported"]
+        + result["dividends_imported"]
+        + result["instruments_created"]
+    ) > 0
+    if imported_any:
+        # Storico completo solo per gli strumenti che ne hanno poco (nuovi).
+        need = [
+            iid for iid in ids
+            if (db.query(func.count(models.PriceHistory.id))
+                  .filter(models.PriceHistory.instrument_id == iid).scalar() or 0) < 30
+        ]
+        background_tasks.add_task(_fetch_prices_after_import, need)
+
+    return result
+
+
+async def _fetch_prices_after_import(instrument_ids: list[int]):
+    """Background: aggiorna FX + prezzi latest (tutti) e lo storico dei nuovi
+    strumenti, così la dashboard mostra valori corretti dopo un ripristino."""
+    from ..services.market import MarketService
+    db = SessionLocal()
+    try:
+        svc = MarketService(db)
+        try:
+            await svc.refresh_all_prices()   # FX + prezzi correnti + enrich
+        except Exception as exc:
+            logger.warning(f"Backup import: refresh prezzi/FX fallito: {exc}")
+        for iid in instrument_ids:
+            try:
+                await svc.fetch_historical_prices(iid, period="5Y")
+            except Exception as exc:
+                logger.warning(f"Backup import: storico fallito per strumento {iid}: {exc}")
+        logger.info(f"Backup import: prezzi/FX aggiornati ({len(instrument_ids)} nuovi strumenti).")
+    finally:
+        db.close()

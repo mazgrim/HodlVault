@@ -69,6 +69,12 @@ def _prepare_env() -> None:
     # L'app desktop può non essere accesa all'orario dello scheduler notturno →
     # aggiorna i prezzi all'avvio (in background).
     os.environ.setdefault("REFRESH_ON_STARTUP", "1")
+    # Forza il DB nella cartella dati portable/AppData PRIMA che app.main chiami
+    # load_dotenv(): così un .env vicino all'eseguibile (es. quello del repo)
+    # non dirotta il database. load_dotenv non sovrascrive le variabili già
+    # impostate, quindi questo valore vince.
+    from app.data_dir import get_database_url
+    os.environ.setdefault("DATABASE_URL", get_database_url())
     if not os.getenv("SECRET_KEY"):
         os.environ["SECRET_KEY"] = _load_or_create_secret()
 

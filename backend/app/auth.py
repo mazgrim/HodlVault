@@ -37,6 +37,15 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 30))
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
+def desktop_mode() -> bool:
+    """
+    True quando l'app gira come applicazione desktop single-user (impostato dal
+    launcher via `DESKTOP_MODE`). Sblocca il login passwordless locale. Di default
+    è False: un deploy web/Docker non espone MAI l'accesso senza password.
+    """
+    return os.getenv("DESKTOP_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 

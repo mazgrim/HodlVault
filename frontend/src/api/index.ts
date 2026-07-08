@@ -7,6 +7,9 @@ export const authApi = {
   register: (username: string, email: string, password: string) =>
     api.post('/auth/register', { username, email, password }),
   me: () => api.get('/auth/me'),
+  config: () => api.get('/auth/config'),
+  desktopLogin: () => api.post('/auth/desktop-login'),
+  desktopSetup: (username: string) => api.post('/auth/desktop-setup', { username }),
   refresh: (refresh_token: string) =>
     api.post('/auth/refresh', { refresh_token }),
   changePassword: (old_password: string, new_password: string) =>
@@ -97,6 +100,23 @@ export const importApi = {
     return api.post('/import/preview', form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
   confirm: (data: object) => api.post('/import/confirm', data),
+}
+
+// ── Backup / Ripristino ─────────────────────────────────────────────────────
+export const backupApi = {
+  exportJson: () => api.get('/backup/export', { responseType: 'blob' }),
+  exportXlsx: () => api.get('/backup/export.xlsx', { responseType: 'blob' }),
+  exportCsv: () => api.get('/backup/export.csv', { responseType: 'blob' }),
+  importPreview: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post('/backup/import/preview', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  importConfirm: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post('/backup/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────

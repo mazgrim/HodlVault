@@ -3,8 +3,50 @@
 Tracker di investimenti personale, self-hosted, in EUR. Tieni traccia di azioni,
 ETF, obbligazioni e crypto in un'unica dashboard, con prezzi aggiornati
 automaticamente da Yahoo Finance. Multi-utente, dark mode, import da broker.
+Gira con Docker oppure come **app desktop nativa** per Windows e Linux.
 
 > Uso privato. Pensato per poche persone (~10 utenti), non per servizio pubblico.
+
+![Dashboard di HodlVault](docs/screenshots/dashboard.png)
+
+<details>
+<summary><b>Altre schermate</b> — Analisi, Performance, Dividendi, Benchmark, Strumenti</summary>
+
+### Analisi — allocazione, concentrazione e look-through dentro gli ETF
+![Analisi](docs/screenshots/analisi.png)
+
+### Performance — rendimenti mensili, drawdown, Sharpe
+![Performance](docs/screenshots/performance.png)
+
+### Dividendi — storico, tassazione e proiezione
+![Dividendi](docs/screenshots/dividendi.png)
+
+### Benchmark — confronto con gli indici (TWR o a versamenti)
+![Benchmark](docs/screenshots/benchmark.png)
+
+### Strumenti — interesse composto, FIRE, PAC vs Lump Sum, inflazione
+![Strumenti](docs/screenshots/tools.png)
+
+</details>
+
+> Le schermate mostrano un portafoglio di esempio con dati inventati.
+
+---
+
+## Download (app desktop)
+
+Gli eseguibili sono nelle [Releases](../../releases) — nessuna compilazione necessaria:
+
+- **Windows** — `HodlVault.exe`, portable: doppio clic, i dati restano in una cartella
+  `data/` accanto all'eseguibile (copi la cartella, i dati la seguono).
+- **Linux** — `HodlVault-x86_64.AppImage`: dati in `~/.local/share/HodlVault`.
+
+L'app desktop apre una **finestra nativa** (niente browser), è single-user e non chiede
+password: al primo avvio scegli solo un nome utente. Per spostare i dati tra installazioni
+(o da/verso Docker) usa **Backup → Esporta JSON** e **Ripristina**.
+
+> L'eseguibile non è firmato: Windows mostrerà *"Windows ha protetto il PC"* →
+> **Ulteriori informazioni → Esegui comunque**. Dettagli in [`desktop/README.md`](desktop/README.md).
 
 ---
 
@@ -28,6 +70,8 @@ automaticamente da Yahoo Finance. Multi-utente, dark mode, import da broker.
 - **Dividendi** — storico incassi, proiezione a 12 mesi, yield-on-cost.
 - **Benchmark** — confronta il tuo portafoglio con indici di mercato (es. MSCI World).
 - **Import CSV** — Fineco, Directa SIM, Trade Republic, con anteprima e dedup automatica.
+- **Backup & ripristino** — export JSON completo dei tuoi dati (trasferibile fra Docker, Windows e Linux) ed export leggibile in XLSX/CSV di transazioni e dividendi. Il ripristino è un merge idempotente: non duplica nulla.
+- **App desktop** — finestra nativa senza browser, single-user: portable per Windows e AppImage per Linux, dallo stesso codice sorgente.
 - **Strumenti** — calcolatori di interesse composto, FIRE, PAC vs Lump Sum, inflazione (tutto lato client).
 - **Multi-utente & Admin** — gestione utenti, reset password, registro accessi e blocco automatico dopo troppi tentativi falliti (protezione anti brute-force).
 - **Modalità demo** — login senza password con dati di esempio, in sola lettura.

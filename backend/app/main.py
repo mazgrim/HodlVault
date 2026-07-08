@@ -11,8 +11,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from pathlib import Path
+
 from .database import engine, Base
-from .routers import auth, portfolio, transactions, performance, dividends, import_data, market_data, admin, tools, benchmark, demo
+from .migrations import run_migrations
+from .frontend_static import mount_frontend
+from .routers import auth, portfolio, transactions, performance, dividends, import_data, market_data, admin, tools, benchmark, demo, backup
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,9 +26,17 @@ scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create tables
+    # Rileva se il file DB esisteva già PRIMA di create_all: serve a decidere se
+    # le migrazioni devono fare il backup (un DB appena creato non ha dati da
+    # proteggere). Vale solo per SQLite su file.
+    db_pre_existed = False
+    if engine.url.get_backend_name() == "sqlite" and engine.url.database not in (None, ":memory:"):
+        db_pre_existed = Path(engine.url.database).exists()
+
+    # Create tables, poi porta lo schema all'ultima versione (migrazioni atomiche
+    # con backup preventivo del file DB — vedi migrations.py).
     Base.metadata.create_all(bind=engine)
-    _ensure_dividend_columns()
+    run_migrations(engine, db_pre_existed=db_pre_existed)
     logger.info("Database tables ready.")
 
     # Backfill historical FX (for EUR conversion of return series) in the background
@@ -42,37 +54,15 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info(f"Scheduler started – price update at {price_hour}:00 daily.")
 
+    # Refresh prezzi all'avvio (in background, non blocca l'app). Utile all'app
+    # desktop, che potrebbe non essere mai in esecuzione all'orario dello
+    # scheduler. Disattivato di default: il launcher lo abilita in desktop mode.
+    if os.getenv("REFRESH_ON_STARTUP", "").strip().lower() in ("1", "true", "yes", "on"):
+        asyncio.create_task(_startup_price_refresh())
+
     yield
 
     scheduler.shutdown(wait=False)
-
-
-def _ensure_dividend_columns():
-    """
-    Lightweight idempotent migration (no Alembic): add the gross/tax columns to
-    dividend_events on SQLite if they are missing, backfilling existing rows so
-    `gross_amount = amount` (i dati storici restano invariati: tasse = 0).
-    """
-    from sqlalchemy import text
-    new_cols = {
-        "gross_amount": "FLOAT",
-        "foreign_tax_amount": "FLOAT DEFAULT 0.0",
-        "tax_amount": "FLOAT DEFAULT 0.0",
-        "accrued_interest": "FLOAT DEFAULT 0.0",
-    }
-    try:
-        with engine.begin() as conn:
-            existing = {row[1] for row in conn.execute(text("PRAGMA table_info(dividend_events)"))}
-            for col, ddl in new_cols.items():
-                if col not in existing:
-                    conn.execute(text(f"ALTER TABLE dividend_events ADD COLUMN {col} {ddl}"))
-                    logger.info(f"Migration: added dividend_events.{col}")
-            # Backfill gross for legacy rows where it's NULL.
-            conn.execute(text(
-                "UPDATE dividend_events SET gross_amount = amount WHERE gross_amount IS NULL"
-            ))
-    except Exception as exc:
-        logger.warning(f"Dividend columns migration skipped: {exc}")
 
 
 async def _startup_fx_backfill():
@@ -95,6 +85,19 @@ async def _nightly_price_update():
         svc = MarketService(db)
         await svc.refresh_all_prices()
         logger.info("Nightly price update complete.")
+    finally:
+        db.close()
+
+
+async def _startup_price_refresh():
+    from .database import SessionLocal
+    from .services.market import MarketService
+    db = SessionLocal()
+    try:
+        await MarketService(db).refresh_all_prices()
+        logger.info("Startup price refresh complete.")
+    except Exception as exc:
+        logger.warning(f"Startup price refresh failed: {exc}")
     finally:
         db.close()
 
@@ -135,8 +138,14 @@ app.include_router(admin.router,        prefix="/api/admin",       tags=["Admin"
 app.include_router(tools.router,        prefix="/api/tools",       tags=["Tools"])
 app.include_router(benchmark.router,    prefix="/api/benchmark",   tags=["Benchmark"])
 app.include_router(demo.router,         prefix="/api/demo",        tags=["Demo"])
+app.include_router(backup.router,       prefix="/api/backup",      tags=["Backup"])
 
 
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "app": "HodlVault"}
+
+
+# Frontend statico (solo se presente una build: bundle desktop). Va montato per
+# ultimo perché registra un catch-all SPA. In Docker/dev non fa nulla.
+mount_frontend(app)

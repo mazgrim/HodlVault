@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, PieChart, Landmark,
   Upload, Wrench, LogOut, ChevronLeft, ChevronRight,
   Users, RefreshCw, History, Menu, ArrowLeftRight, BarChart2,
-  Sun, Moon, KeyRound, User, ChevronUp, ChevronDown,
+  Sun, Moon, KeyRound, User, ChevronUp, ChevronDown, DatabaseBackup,
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
@@ -19,6 +19,7 @@ const NAV = [
   { to: '/dividends',     icon: Landmark,        label: 'Dividendi' },
   { to: '/transactions',  icon: ArrowLeftRight,  label: 'Transazioni' },
   { to: '/import',        icon: Upload,          label: 'Importa' },
+  { to: '/backup',        icon: DatabaseBackup,  label: 'Backup' },
   { to: '/tools',         icon: Wrench,          label: 'Tools' },
 ]
 
@@ -27,8 +28,13 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, logout, isDemo } = useAuth()
+  const { user, logout, isDemo, desktopMode } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  // In desktop mode (single-user, passwordless) admin / cambio password / logout
+  // non hanno senso: nascosti.
+  const showAdmin = !!user?.is_admin && !desktopMode
+  const showChangePassword = !isDemo && !desktopMode
+  const showLogout = !desktopMode
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -52,11 +58,11 @@ export default function Layout({ children }: LayoutProps) {
 
   // Admin notification: count of pending password-reset requests for the badge.
   useEffect(() => {
-    if (!user?.is_admin) { setPendingResets(0); return }
+    if (!showAdmin) { setPendingResets(0); return }
     adminApi.passwordRequests()
       .then((r) => setPendingResets(r.data.length))
       .catch(() => {})
-  }, [user?.is_admin])
+  }, [showAdmin])
 
   // Foreground progress bar + percentage badge for the market-data actions, so the
   // user sees that something is happening even when the request is near-instant.
@@ -91,16 +97,25 @@ export default function Layout({ children }: LayoutProps) {
     }
   }
 
+  // I dati di mercato finiscono nel DB, ma le pagine hanno già caricato i loro
+  // dati in memoria (rifetchano solo al cambio di portafoglio/periodo). Senza un
+  // reload, l'utente clicca "Aggiorna prezzi" e non vede cambiare nulla.
   const handleRefresh = async () => {
     setBarLabel('Aggiornamento prezzi')
     setRefreshing(true)
-    try { await withMinTime(() => marketApi.refreshPrices()) } finally { setRefreshing(false) }
+    try {
+      await withMinTime(() => marketApi.refreshPrices())
+      window.location.reload()
+    } finally { setRefreshing(false) }
   }
 
   const handleLoadHistory = async () => {
     setBarLabel('Caricamento storico')
     setLoadingHistory(true)
-    try { await withMinTime(() => marketApi.refreshHistory()) } finally { setLoadingHistory(false) }
+    try {
+      await withMinTime(() => marketApi.refreshHistory())
+      window.location.reload()
+    } finally { setLoadingHistory(false) }
   }
 
   const sidebarContent = (
@@ -164,7 +179,7 @@ export default function Layout({ children }: LayoutProps) {
         </button>
         {collapsed ? (
           <>
-            {user?.is_admin && (
+            {showAdmin && (
               <NavLink
                 to="/admin" onClick={() => setMobileOpen(false)} title="Amministrazione"
                 className={({ isActive }) =>
@@ -177,7 +192,7 @@ export default function Layout({ children }: LayoutProps) {
                 {pendingResets > 0 && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />}
               </NavLink>
             )}
-            {!isDemo && (
+            {showChangePassword && (
               <button onClick={() => setShowChangePw(true)} title="Cambia password"
                 className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-gold-400 hover:bg-navy-700/60 transition-all w-full">
                 <KeyRound size={18} />
@@ -187,16 +202,18 @@ export default function Layout({ children }: LayoutProps) {
               className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-gold-400 hover:bg-navy-700/60 transition-all w-full">
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button onClick={logout} title="Esci"
-              className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-all w-full">
-              <LogOut size={18} />
-            </button>
+            {showLogout && (
+              <button onClick={logout} title="Esci"
+                className="flex items-center justify-center px-3 py-2.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-900/20 transition-all w-full">
+                <LogOut size={18} />
+              </button>
+            )}
           </>
         ) : (
           <div className="relative" data-account-menu>
             {accountOpen && (
               <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg bg-navy-700 border border-gray-700/60 shadow-xl py-1 z-20">
-                {user?.is_admin && (
+                {showAdmin && (
                   <NavLink
                     to="/admin" onClick={() => { setAccountOpen(false); setMobileOpen(false) }}
                     className={({ isActive }) =>
@@ -214,7 +231,7 @@ export default function Layout({ children }: LayoutProps) {
                     )}
                   </NavLink>
                 )}
-                {!isDemo && (
+                {showChangePassword && (
                   <button onClick={() => { setAccountOpen(false); setShowChangePw(true) }}
                     className="flex items-center gap-3 px-3 py-2 text-sm w-full text-gray-300 hover:text-gold-400 hover:bg-navy-600/60 transition-colors">
                     <KeyRound size={16} className="flex-shrink-0" />
@@ -226,11 +243,13 @@ export default function Layout({ children }: LayoutProps) {
                   {theme === 'dark' ? <Sun size={16} className="flex-shrink-0" /> : <Moon size={16} className="flex-shrink-0" />}
                   <span>{theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}</span>
                 </button>
-                <button onClick={() => { setAccountOpen(false); logout() }}
-                  className="flex items-center gap-3 px-3 py-2 text-sm w-full text-gray-300 hover:text-red-400 hover:bg-red-900/20 transition-colors">
-                  <LogOut size={16} className="flex-shrink-0" />
-                  <span>Esci</span>
-                </button>
+                {showLogout && (
+                  <button onClick={() => { setAccountOpen(false); logout() }}
+                    className="flex items-center gap-3 px-3 py-2 text-sm w-full text-gray-300 hover:text-red-400 hover:bg-red-900/20 transition-colors">
+                    <LogOut size={16} className="flex-shrink-0" />
+                    <span>Esci</span>
+                  </button>
+                )}
               </div>
             )}
             <button onClick={() => setAccountOpen((o) => !o)}

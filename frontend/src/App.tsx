@@ -8,6 +8,8 @@ import Performance from './pages/Performance'
 import Analysis from './pages/Analysis'
 import Dividends from './pages/Dividends'
 import Import from './pages/Import'
+import DesktopSetup from './pages/DesktopSetup'
+import Backup from './pages/Backup'
 import Tools from './pages/Tools'
 import Admin from './pages/Admin'
 import Transactions from './pages/Transactions'
@@ -31,6 +33,15 @@ function App() {
     )
   }
 
+  // Primo avvio dell'app desktop: scelta del nome utente prima di tutto.
+  if (auth.needsSetup) {
+    return (
+      <AuthContext.Provider value={auth}>
+        <DesktopSetup />
+      </AuthContext.Provider>
+    )
+  }
+
   return (
     <AuthContext.Provider value={auth}>
       <BrowserRouter>
@@ -46,6 +57,7 @@ function App() {
               <Route path="dividends"   element={<Dividends />} />
               <Route path="transactions" element={<Transactions />} />
               <Route path="import"      element={<Import />} />
+              <Route path="backup"      element={<Backup />} />
               <Route path="tools"       element={<Tools />} />
               <Route path="benchmark"   element={<Benchmark />} />
               <Route path="admin"       element={<Admin />} />

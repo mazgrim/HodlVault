@@ -1,0 +1,139 @@
+name: Release desktop
+
+# Pubblica gli eseguibili desktop come asset di una GitHub Release.
+# Si attiva al push di un tag "v*" (es. v0.1.0):
+#     git tag v0.1.0 && git push origin v0.1.0
+# Con "Run workflow" (workflow_dispatch) i binari vengono solo costruiti e
+# caricati come artifact, senza creare una Release.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Portable Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Dipendenze Python
+        run: pip install -r backend/requirements.txt -r desktop/requirements-desktop.txt
+
+      - name: PyInstaller
+        run: pyinstaller --clean --noconfirm desktop/hodlvault.spec
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HodlVault-windows
+          path: dist/HodlVault.exe
+          if-no-files-found: error
+
+  linux:
+    name: AppImage Linux
+    runs-on: ubuntu-22.04
+    # L'AppImage non è ancora collaudato (GTK/WebKit2GTK non vengono impacchettati
+    # da PyInstaller): se fallisce non deve bloccare la release dell'.exe.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Runtime GTK/WebKit (pywebview) + FUSE (AppImage)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-venv python3-gi gir1.2-webkit2-4.0 libwebkit2gtk-4.0-37 libfuse2
+
+      - name: appimagetool
+        run: |
+          curl -sSLo /tmp/appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+          sudo mv /tmp/appimagetool /usr/local/bin/appimagetool
+
+      # venv con --system-site-packages: pywebview (GTK) importa `gi`, che è
+      # installato via apt e non sarebbe visibile in un venv isolato.
+      - name: Ambiente Python
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt -r desktop/requirements-desktop.txt
+          .venv/bin/python -c "import webview; print('pywebview OK')"
+
+      - name: Build AppImage
+        run: |
+          source .venv/bin/activate
+          chmod +x desktop/build-appimage.sh
+          ./desktop/build-appimage.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HodlVault-linux
+          path: dist/HodlVault-x86_64.AppImage
+          if-no-files-found: error
+
+  release:
+    name: Pubblica la Release
+    needs: [windows, linux]
+    # Basta che il build Windows sia riuscito; l'AppImage è opzionale.
+    if: always() && needs.windows.result == 'success' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: HodlVault-*
+          merge-multiple: true
+
+      - name: Crea la Release e allega i binari
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -la artifacts
+          gh release create "${GITHUB_REF_NAME}" artifacts/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "HodlVault ${GITHUB_REF_NAME}" \
+            --notes-file - <<'EOF'
+          ## Download
+
+          - **Windows (portable)** — `HodlVault.exe`: scaricalo e fai doppio clic.
+            I tuoi dati finiscono in una cartella `data/` accanto all'eseguibile:
+            copiando la cartella, i dati viaggiano con essa.
+          - **Linux** — `HodlVault-x86_64.AppImage` (se presente): `chmod +x` e lancialo.
+            Richiede `webkit2gtk` installato sul sistema. Dati in `~/.local/share/HodlVault`.
+
+          ### Avviso di Windows all'apertura
+          L'eseguibile **non è firmato digitalmente**, quindi SmartScreen mostrerà
+          *"Windows ha protetto il PC"*. È normale: clicca **Ulteriori informazioni →
+          Esegui comunque**. Il codice sorgente è interamente in questo repository.
+
+          ### Spostare i dati fra installazioni
+          Usa **Backup → Esporta JSON** su un'installazione e **Backup → Ripristina**
+          sull'altra: il formato è versionato e compatibile fra Windows, Linux e Docker.
+          EOF

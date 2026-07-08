@@ -223,7 +223,25 @@ def main() -> int:
     )
     # L'HWND esiste solo a finestra mostrata → applica lì la barra scura.
     window.events.shown += lambda *_: _apply_dark_titlebar(window)
-    webview.start()  # blocca finché la finestra è aperta
+
+    # private_mode di pywebview è True di default: sessione effimera con storage
+    # web non persistente. Su WebKitGTK questo rende `localStorage` inaccessibile
+    # (SecurityError sulle origin http://), e il frontend lo usa per i token: la
+    # prima getItem lancia, `setLoading(false)` non viene mai raggiunto e resta la
+    # schermata di caricamento (navy) all'infinito. private_mode=False + uno
+    # storage_path persistente risolve, ed è anche corretto per un'app desktop:
+    # cosi' la sessione sopravvive ai riavvii invece di sloggare a ogni chiusura.
+    from app.data_dir import get_data_dir
+    storage = get_data_dir() / "webview"
+    try:
+        storage.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    webview.start(  # blocca finché la finestra è aperta
+        private_mode=False,
+        storage_path=str(storage),
+        debug=bool(os.getenv("HODLVAULT_DEBUG")),
+    )
 
     # Finestra chiusa → spegni il server.
     server.should_exit = True

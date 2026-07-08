@@ -4,6 +4,18 @@ App native single-user, **senza browser**: una finestra nativa (pywebview) mostr
 l'interfaccia mentre il backend FastAPI gira in locale su una porta effimera.
 Stesso codice di Docker/web — cambia solo il modo di avviare e impacchettare.
 
+## Download (senza compilare nulla)
+Gli eseguibili sono pubblicati nelle [Releases](../../releases): scarica
+`HodlVault.exe` (Windows, portable) o `HodlVault-x86_64.AppImage` (Linux).
+Li costruisce GitHub Actions al push di un tag `v*` (vedi
+`.github/workflows/release.yml`); compilare in locale serve solo per sviluppare.
+
+> **Avviso di Windows.** L'eseguibile non è firmato digitalmente, quindi SmartScreen
+> mostra *"Windows ha protetto il PC"*. Clicca **Ulteriori informazioni → Esegui
+> comunque**. Un certificato di code signing è a pagamento; il sorgente è tutto qui.
+> Per lo stesso motivo alcuni antivirus segnalano euristicamente i binari
+> PyInstaller: per ridurre i falsi positivi la compressione UPX è disattivata.
+
 ## Come funziona
 Al **primo avvio** l'app chiede solo un nome utente (nessuna password) e crea il
 profilo locale; agli avvii successivi entra da sola. Essendo single-user, le

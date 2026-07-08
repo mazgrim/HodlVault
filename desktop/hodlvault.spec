@@ -42,6 +42,18 @@ datas += _web_datas
 binaries += _web_bins
 hiddenimports += _web_hidden
 
+# Su Linux il backend GTK di pywebview importa `gi` dinamicamente: senza
+# raccoglierlo, l'AppImage parte e poi non trova la webview.
+import sys as _sysplat
+if _sysplat.platform.startswith("linux"):
+    try:
+        _gi_datas, _gi_bins, _gi_hidden = collect_all("gi")
+        datas += _gi_datas
+        binaries += _gi_bins
+        hiddenimports += _gi_hidden
+    except Exception as _exc:  # gi assente: lo segnala il preflight dello script
+        print(f"WARNING: collect_all('gi') fallito: {_exc}")
+
 import sys as _sys
 
 _icon_ico = os.path.join(SPEC_DIR, "icon.ico")
@@ -79,7 +91,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX peggiora sensibilmente i falsi positivi degli antivirus sui binari
+    # PyInstaller: per i binari distribuiti conviene lasciarlo disattivato.
+    upx=False,
     runtime_tmpdir=None,
     console=False,   # nessuna finestra console; metti True per debug del primo build
     disable_windowed_traceback=False,

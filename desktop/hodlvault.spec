@@ -42,9 +42,18 @@ datas += _web_datas
 binaries += _web_bins
 hiddenimports += _web_hidden
 
+import sys as _sys
+
 _icon_ico = os.path.join(SPEC_DIR, "icon.ico")
 _icon_png = os.path.join(SPEC_DIR, "icon.png")
-icon = _icon_ico if os.path.exists(_icon_ico) else (_icon_png if os.path.exists(_icon_png) else None)
+if _sys.platform.startswith("win"):
+    icon = _icon_ico if os.path.exists(_icon_ico) else None
+elif _sys.platform == "darwin":
+    icon = _icon_png if os.path.exists(_icon_png) else None
+else:
+    # Linux: PyInstaller ignora l'icona sugli eseguibili ELF; per l'AppImage la
+    # fornisce il file .desktop + hodlvault.png nell'AppDir.
+    icon = None
 
 a = Analysis(
     [os.path.join(SPEC_DIR, "launcher.py")],

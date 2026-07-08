@@ -8,11 +8,27 @@
 #   - appimagetool nel PATH (https://github.com/AppImage/AppImageKit/releases)
 set -euo pipefail
 
+echo "==> Preflight"
+command -v appimagetool >/dev/null 2>&1 || {
+  echo "ERRORE: 'appimagetool' non è nel PATH."
+  echo "        Scaricalo da https://github.com/AppImage/AppImageKit/releases,"
+  echo "        rendilo eseguibile e mettilo nel PATH."
+  exit 1
+}
+
 echo "==> Build frontend"
 ( cd frontend && npm ci && npm run build )
 
 echo "==> Dipendenze Python (backend + desktop)"
 pip install -r backend/requirements.txt -r desktop/requirements-desktop.txt
+
+# pywebview su Linux si appoggia a GTK + WebKit2GTK *di sistema*: se manca,
+# meglio saperlo adesso che a build finito.
+python -c "import webview" >/dev/null 2>&1 || {
+  echo "ERRORE: 'import webview' fallisce — mancano i runtime GUI di sistema."
+  echo "        Debian/Ubuntu: sudo apt install python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0"
+  exit 1
+}
 
 echo "==> PyInstaller (binario onefile)"
 pyinstaller --clean --noconfirm desktop/hodlvault.spec
@@ -54,4 +70,8 @@ appimagetool "$APPDIR" dist/HodlVault-x86_64.AppImage
 
 echo ""
 echo "OK -> dist/HodlVault-x86_64.AppImage"
-echo "Dati utente in ~/.local/share/HodlVault (XDG)."
+echo "Dati utente in ~/.local/share/HodlVault (XDG), NON accanto all'AppImage."
+echo ""
+echo "NOTA: questo AppImage non include GTK/WebKit2GTK (PyInstaller non li impacchetta)."
+echo "      Gira su sistemi che hanno già webkit2gtk installato. Per renderlo davvero"
+echo "      autonomo servirebbe linuxdeploy con il plugin GTK."

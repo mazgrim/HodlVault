@@ -97,16 +97,25 @@ export default function Layout({ children }: LayoutProps) {
     }
   }
 
+  // I dati di mercato finiscono nel DB, ma le pagine hanno già caricato i loro
+  // dati in memoria (rifetchano solo al cambio di portafoglio/periodo). Senza un
+  // reload, l'utente clicca "Aggiorna prezzi" e non vede cambiare nulla.
   const handleRefresh = async () => {
     setBarLabel('Aggiornamento prezzi')
     setRefreshing(true)
-    try { await withMinTime(() => marketApi.refreshPrices()) } finally { setRefreshing(false) }
+    try {
+      await withMinTime(() => marketApi.refreshPrices())
+      window.location.reload()
+    } finally { setRefreshing(false) }
   }
 
   const handleLoadHistory = async () => {
     setBarLabel('Caricamento storico')
     setLoadingHistory(true)
-    try { await withMinTime(() => marketApi.refreshHistory()) } finally { setLoadingHistory(false) }
+    try {
+      await withMinTime(() => marketApi.refreshHistory())
+      window.location.reload()
+    } finally { setLoadingHistory(false) }
   }
 
   const sidebarContent = (

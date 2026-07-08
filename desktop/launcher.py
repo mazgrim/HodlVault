@@ -109,6 +109,32 @@ def free_port() -> int:
     return port
 
 
+def _restore_system_library_path() -> None:
+    """
+    Ripristina LD_LIBRARY_PATH all'originale prima di avviare la webview.
+
+    Il bootloader PyInstaller punta LD_LIBRARY_PATH alla cartella del bundle
+    (_MEIPASS) e salva l'originale in LD_LIBRARY_PATH_ORIG. WebKitGTK, per
+    renderizzare, avvia processi FIGLI separati (WebKitNetworkProcess,
+    WebKitWebProcess): sono i binari *di sistema*, ma ereditano il nostro
+    LD_LIBRARY_PATH e finiscono per caricare le librerie del bundle (libssl,
+    libcrypto, libsqlite3… compilate su un'altra distro) invece di quelle di
+    sistema. Il mismatch fa morire il processo web → finestra con solo lo
+    sfondo, nessun contenuto, e nessun errore nel nostro stdout (il crash è nel
+    figlio).
+
+    Il nostro processo ha gia' caricato le sue librerie: ripristinare qui la
+    variabile non lo tocca, ma i figli di WebKit useranno le librerie di sistema.
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    orig = os.environ.get("LD_LIBRARY_PATH_ORIG")
+    if orig is not None:
+        os.environ["LD_LIBRARY_PATH"] = orig
+    else:
+        os.environ.pop("LD_LIBRARY_PATH", None)
+
+
 def start_server(port: int):
     """Avvia uvicorn in un thread daemon. Ritorna l'oggetto server (per fermarlo)."""
     import uvicorn
@@ -187,6 +213,9 @@ def main() -> int:
         return 1
 
     import webview  # importato solo qui: non serve per i test della logica server
+    # I processi figli di WebKit devono usare le librerie di sistema, non quelle
+    # del bundle: ripristina LD_LIBRARY_PATH prima di far partire la webview.
+    _restore_system_library_path()
     url = f"http://127.0.0.1:{port}/"
     window = webview.create_window(
         APP_NAME, url, width=1280, height=820, min_size=(900, 600),

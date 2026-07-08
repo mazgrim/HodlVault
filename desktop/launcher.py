@@ -24,6 +24,7 @@ import urllib.request
 from pathlib import Path
 
 APP_NAME = "HodlVault"
+WINDOW_BG = "#0F0F1A"   # navy-900 del tema scuro (evita il flash bianco all'avvio)
 
 
 def _is_frozen() -> bool:
@@ -125,6 +126,42 @@ def start_server(port: int):
     return server
 
 
+def _apply_dark_titlebar(window) -> None:
+    """
+    Barra del titolo scura su Windows 10 (1809+) e 11, mantenendo il frame
+    nativo: si imposta l'attributo DWM DWMWA_USE_IMMERSIVE_DARK_MODE sull'HWND.
+    Best-effort — qualunque errore qui non deve impedire l'avvio dell'app.
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        hwnd = 0
+        # pywebview (backend WinForms) espone la Form nativa con .Handle
+        handle = getattr(getattr(window, "native", None), "Handle", None)
+        if handle is not None:
+            hwnd = int(handle)
+        if not hwnd:  # fallback: cerca la finestra per titolo
+            hwnd = ctypes.windll.user32.FindWindowW(None, APP_NAME)
+        if not hwnd:
+            return
+
+        value = ctypes.c_int(1)  # 1 = dark mode
+        # 20 = DWMWA_USE_IMMERSIVE_DARK_MODE (Win11 e Win10 >= build 18985)
+        # 19 = stesso attributo sulle build di Win10 precedenti
+        for attr in (20, 19):
+            res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                wintypes.HWND(hwnd), ctypes.c_uint(attr),
+                ctypes.byref(value), ctypes.sizeof(value),
+            )
+            if res == 0:
+                break
+    except Exception as exc:  # pragma: no cover - dipende dall'OS
+        print(f"Barra del titolo scura non applicata: {exc}", file=sys.stderr)
+
+
 def wait_healthy(port: int, timeout: float = 30.0) -> bool:
     url = f"http://127.0.0.1:{port}/api/health"
     deadline = time.time() + timeout
@@ -151,7 +188,12 @@ def main() -> int:
 
     import webview  # importato solo qui: non serve per i test della logica server
     url = f"http://127.0.0.1:{port}/"
-    webview.create_window(APP_NAME, url, width=1280, height=820, min_size=(900, 600))
+    window = webview.create_window(
+        APP_NAME, url, width=1280, height=820, min_size=(900, 600),
+        background_color=WINDOW_BG,   # niente lampo bianco prima del render
+    )
+    # L'HWND esiste solo a finestra mostrata → applica lì la barra scura.
+    window.events.shown += lambda *_: _apply_dark_titlebar(window)
     webview.start()  # blocca finché la finestra è aperta
 
     # Finestra chiusa → spegni il server.

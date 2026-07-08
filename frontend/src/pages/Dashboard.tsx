@@ -233,9 +233,11 @@ export default function Dashboard() {
           {/* Chart */}
           <div className="card">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-              <div className="flex flex-col gap-1.5">
+              {/* Variazione in linea col titolo: più leggibile e non allunga la card.
+                  Su schermi stretti va a capo da sola. */}
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <h2 className="text-base font-semibold text-gray-200">Valore nel Tempo</h2>
-                <ChangeBadge label={period} amount={chartChange.abs} pct={chartChange.pct} />
+                <ChangeBadge label={period} amount={chartChange.abs} pct={chartChange.pct} size="lg" />
               </div>
               <div className="flex gap-1 flex-wrap">
                 {PERIODS.map((p) => (

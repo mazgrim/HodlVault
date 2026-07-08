@@ -54,6 +54,41 @@ if _sysplat.platform.startswith("linux"):
     except Exception as _exc:  # gi assente: lo segnala il preflight dello script
         print(f"WARNING: collect_all('gi') fallito: {_exc}")
 
+# `collect_all('gi')` non si limita al package Python: trascina nel bundle
+# l'intero stack GTK/GLib di *questa* macchina, e con esso la libstdc++ del suo
+# compilatore. Ma la libwebkit NON viene impacchettata (PyInstaller non la vede:
+# pywebview la carica via typelib a runtime), quindi sul sistema di destinazione
+# la webkit *di sistema* finisce per essere risolta contro la libstdc++ *della
+# build*. Su una build 22.04 letta da Debian 13:
+#
+#   Failed to load shared library 'libwebkit2gtk-4.1.so.0' referenced by the
+#   typelib: libstdc++.so.6: version `CXXABI_1.3.15' not found
+#   (required by /lib/x86_64-linux-gnu/libicui18n.so.76)
+#
+# Se pretendiamo webkit2gtk installato sul target (e lo pretendiamo), allora
+# quel sistema ha già GTK, GLib e una libstdc++ almeno pari alla sua webkit:
+# vanno prese da lì, non da qui. Restano bundlate solo libpython e le librerie
+# di supporto dell'interprete (ssl, sqlite3, ffi, compressione…).
+_SYSTEM_LIBS = (
+    "libstdc++", "libgcc_s", "libatomic",
+    "libglib-2.0", "libgobject-2.0", "libgio-2.0", "libgmodule-2.0", "libgirepository",
+    "libgtk-3", "libgdk-3", "libgdk_pixbuf", "libatk", "libatspi",
+    "libpango", "libcairo", "libharfbuzz", "libepoxy", "libfontconfig", "libfreetype",
+    "libfribidi", "libgraphite2", "libpixman", "libthai", "libdatrie", "libxkbcommon",
+    "libxcb-render", "libxcb-shm", "librsvg", "libglycin", "libpng16",
+    "libdbus-1", "libselinux", "libsystemd", "libmount", "libblkid", "libuuid",
+    "libpcre2-8", "libproxy", "libpxbackend", "libduktape", "liblcms2",
+    "libcurl-gnutls", "libnghttp2", "librtmp", "libssh2", "libpsl", "libldap", "liblber",
+    "libsasl2", "libgnutls", "libnettle", "libhogweed", "libtasn1", "libidn2",
+    "libunistring", "libp11-kit", "libgmp", "libkrb5", "libk5crypto", "libgssapi_krb5",
+    "libcom_err", "libkeyutils", "libbrotli", "libseccomp", "libxml2",
+)
+
+
+def _is_system_lib(dest: str) -> bool:
+    return os.path.basename(dest).startswith(_SYSTEM_LIBS)
+
+
 import sys as _sys
 
 _icon_ico = os.path.join(SPEC_DIR, "icon.ico")
@@ -78,6 +113,11 @@ a = Analysis(
     excludes=[],
     noarchive=False,
 )
+
+if _sysplat.platform.startswith("linux"):
+    _before = len(a.binaries)
+    a.binaries = [_e for _e in a.binaries if not _is_system_lib(_e[0])]
+    print(f"spec: escluse {_before - len(a.binaries)} librerie di sistema dal bundle")
 
 pyz = PYZ(a.pure)
 

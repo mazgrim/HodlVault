@@ -177,13 +177,28 @@ def _apply_dark_titlebar(window) -> None:
         value = ctypes.c_int(1)  # 1 = dark mode
         # 20 = DWMWA_USE_IMMERSIVE_DARK_MODE (Win11 e Win10 >= build 18985)
         # 19 = stesso attributo sulle build di Win10 precedenti
+        applied = False
         for attr in (20, 19):
             res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 wintypes.HWND(hwnd), ctypes.c_uint(attr),
                 ctypes.byref(value), ctypes.sizeof(value),
             )
             if res == 0:
+                applied = True
                 break
+
+        # DwmSetWindowAttribute su una finestra GIÀ mostrata imposta l'attributo
+        # ma NON ridisegna l'area non-client: la barra resta chiara finché un
+        # evento non forza il repaint del frame (es. il primo resize/massimizza —
+        # ecco perché diventava scura solo allargando la finestra). Forziamo qui
+        # il ricalcolo del frame senza toccare posizione, dimensione o z-order.
+        if applied:
+            SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_NOACTIVATE = 0x1, 0x2, 0x4, 0x10
+            SWP_FRAMECHANGED = 0x20
+            ctypes.windll.user32.SetWindowPos(
+                wintypes.HWND(hwnd), None, 0, 0, 0, 0,
+                SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
     except Exception as exc:  # pragma: no cover - dipende dall'OS
         print(f"Barra del titolo scura non applicata: {exc}", file=sys.stderr)
 

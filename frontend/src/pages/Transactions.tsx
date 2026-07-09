@@ -367,7 +367,7 @@ export default function Transactions() {
                       </td>
                       <td className="py-3 pr-4">
                         <Link to={`/instruments/${tx.instrument.id}`} className="group">
-                          <div className="font-semibold text-gray-100 group-hover:text-gold-400 transition-colors truncate max-w-[200px]">{tx.instrument.name}</div>
+                          <div className="font-semibold text-gray-100 group-hover:text-gold-400 transition-colors break-words leading-snug max-w-[240px]" title={tx.instrument.name}>{tx.instrument.name}</div>
                           <div className="text-xs text-gray-500 font-mono mt-0.5">
                             {tx.instrument.ticker}{tx.instrument.isin ? ` · ${tx.instrument.isin}` : ''}
                           </div>

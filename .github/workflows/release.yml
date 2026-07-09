@@ -89,7 +89,6 @@ jobs:
       - name: Build AppImage
         run: |
           source .venv/bin/activate
-          chmod +x desktop/build-appimage.sh
           ./desktop/build-appimage.sh
 
       - uses: actions/upload-artifact@v4

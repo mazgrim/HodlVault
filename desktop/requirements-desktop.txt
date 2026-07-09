@@ -10,4 +10,4 @@
 # Su Windows usa il runtime Edge WebView2 (di norma già presente su Win10/11).
 
 pywebview==5.1
-pyinstaller==6.10.0
+pyinstaller==6.21.0

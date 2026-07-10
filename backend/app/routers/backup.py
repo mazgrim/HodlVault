@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 SCHEMA_VERSION = 1
-APP_VERSION = "1.0.0"
+APP_VERSION = "0.9.0"
 
 
 # ── helpers: raccolta dati (SEMPRE scoped sull'utente) ────────────────────────

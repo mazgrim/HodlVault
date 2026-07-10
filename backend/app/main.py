@@ -104,7 +104,7 @@ async def _startup_price_refresh():
 
 app = FastAPI(
     title="HodlVault API",
-    version="1.0.0",
+    version="0.9.0",
     lifespan=lifespan,
 )
 

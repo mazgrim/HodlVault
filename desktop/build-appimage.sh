@@ -56,6 +56,7 @@ Exec=HodlVault
 Icon=hodlvault
 Categories=Office;Finance;
 Terminal=false
+StartupWMClass=HodlVault
 EOF
 
 # Icona (usa desktop/icon.png se presente, altrimenti un placeholder 1x1).

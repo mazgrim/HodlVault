@@ -36,6 +36,12 @@ hiddenimports += ["h11", "email_validator"]
 datas = [(FRONTEND_DIST, "frontend")]
 binaries = []
 
+# Su Linux l'icona della finestra non viene dall'eseguibile: il launcher la
+# passa a webview.start(icon=...), quindi il PNG deve stare nel bundle.
+_icon_png_src = os.path.join(SPEC_DIR, "icon.png")
+if os.path.exists(_icon_png_src):
+    datas.append((_icon_png_src, "."))
+
 # pywebview porta con sé binari/dati specifici per piattaforma.
 _web_datas, _web_bins, _web_hidden = collect_all("webview")
 datas += _web_datas

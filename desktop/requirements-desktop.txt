@@ -9,5 +9,6 @@
 #   sudo apt install python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0
 # Su Windows usa il runtime Edge WebView2 (di norma già presente su Win10/11).
 
-pywebview==5.1
+# >=5.3 per webview.start(icon=...) — icona di finestra sul backend GTK (Linux)
+pywebview==5.4
 pyinstaller==6.21.0

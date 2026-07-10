@@ -19,13 +19,13 @@ jobs:
     name: Portable Windows (.exe)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: npm
@@ -43,7 +43,7 @@ jobs:
       - name: PyInstaller
         run: pyinstaller --clean --noconfirm desktop/hodlvault.spec
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: HodlVault-windows
           path: dist/HodlVault.exe
@@ -52,13 +52,10 @@ jobs:
   linux:
     name: AppImage Linux
     runs-on: ubuntu-22.04
-    # L'AppImage non è ancora collaudato (GTK/WebKit2GTK non vengono impacchettati
-    # da PyInstaller): se fallisce non deve bloccare la release dell'.exe.
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: npm
@@ -91,7 +88,7 @@ jobs:
           source .venv/bin/activate
           ./desktop/build-appimage.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: HodlVault-linux
           path: dist/HodlVault-x86_64.AppImage
@@ -100,11 +97,10 @@ jobs:
   release:
     name: Pubblica la Release
     needs: [windows, linux]
-    # Basta che il build Windows sia riuscito; l'AppImage è opzionale.
-    if: always() && needs.windows.result == 'success' && startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: artifacts
           pattern: HodlVault-*
@@ -124,7 +120,7 @@ jobs:
           - **Windows (portable)** — `HodlVault.exe`: scaricalo e fai doppio clic.
             I tuoi dati finiscono in una cartella `data/` accanto all'eseguibile:
             copiando la cartella, i dati viaggiano con essa.
-          - **Linux** — `HodlVault-x86_64.AppImage` (se presente): `chmod +x` e lancialo.
+          - **Linux** — `HodlVault-x86_64.AppImage`: `chmod +x` e lancialo.
             Richiede `webkit2gtk` installato sul sistema. Dati in `~/.local/share/HodlVault`.
 
           ### Avviso di Windows all'apertura

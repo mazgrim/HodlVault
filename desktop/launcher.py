@@ -203,6 +203,22 @@ def _apply_dark_titlebar(window) -> None:
         print(f"Barra del titolo scura non applicata: {exc}", file=sys.stderr)
 
 
+def _window_icon_path():
+    """
+    Icona della finestra su Linux (backend GTK di pywebview).
+
+    Su Windows l'icona vive nella risorsa dell'exe (PyInstaller icon=…); su
+    Linux invece va impostata sulla finestra GTK a runtime, altrimenti il WM
+    mostra il fallback di WebKit (la "W") o nessuna icona. Il PNG è incluso
+    nel bundle dalla spec; in dev si usa quello in desktop/.
+    """
+    if not sys.platform.startswith("linux"):
+        return None
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    icon = base / "icon.png"
+    return str(icon) if icon.is_file() else None
+
+
 def wait_healthy(port: int, timeout: float = 30.0) -> bool:
     url = f"http://127.0.0.1:{port}/api/health"
     deadline = time.time() + timeout
@@ -256,6 +272,7 @@ def main() -> int:
         private_mode=False,
         storage_path=str(storage),
         debug=bool(os.getenv("HODLVAULT_DEBUG")),
+        icon=_window_icon_path(),  # solo GTK/QT; su Windows l'icona è nell'exe
     )
 
     # Finestra chiusa → spegni il server.

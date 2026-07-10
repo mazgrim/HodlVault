@@ -52,9 +52,6 @@ jobs:
   linux:
     name: AppImage Linux
     runs-on: ubuntu-22.04
-    # L'AppImage non è ancora collaudato (GTK/WebKit2GTK non vengono impacchettati
-    # da PyInstaller): se fallisce non deve bloccare la release dell'.exe.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

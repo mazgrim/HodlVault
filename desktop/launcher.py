@@ -219,6 +219,50 @@ def _window_icon_path():
     return str(icon) if icon.is_file() else None
 
 
+def _integrate_appimage() -> None:
+    """
+    Auto-integrazione desktop dell'AppImage (solo Linux, best-effort).
+
+    Su Wayland la finestra non può impostare la propria icona a runtime
+    (set_icon_from_file è un no-op nel protocollo): la shell risolve l'icona
+    solo da un file .desktop installato che matcha la finestra (via
+    StartupWMClass / app_id). Scriviamo quindi .desktop + icona in
+    ~/.local/share: icona corretta anche su Wayland e HodlVault compare nel
+    menu applicazioni. Idempotente; riscrive il .desktop se l'AppImage è
+    stata spostata (Exec cambiato).
+    """
+    appimage = os.environ.get("APPIMAGE")  # settata dal runtime AppImage
+    if not sys.platform.startswith("linux") or not appimage:
+        return
+    try:
+        import shutil
+        data_home = Path(
+            os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+        )
+        icon_src = _window_icon_path()
+        if icon_src:
+            icon_dst = data_home / "icons" / "hicolor" / "256x256" / "apps" / "hodlvault.png"
+            icon_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(icon_src, icon_dst)
+        desktop_entry = (
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            f"Name={APP_NAME}\n"
+            "Comment=Tracker di investimenti personale\n"
+            f'Exec="{appimage}"\n'
+            "Icon=hodlvault\n"
+            "Categories=Office;Finance;\n"
+            "Terminal=false\n"
+            f"StartupWMClass={APP_NAME}\n"
+        )
+        dst = data_home / "applications" / "hodlvault.desktop"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if not dst.is_file() or dst.read_text(encoding="utf-8") != desktop_entry:
+            dst.write_text(desktop_entry, encoding="utf-8")
+    except Exception as exc:  # non deve mai impedire l'avvio
+        print(f"Integrazione desktop non riuscita: {exc}", file=sys.stderr)
+
+
 def wait_healthy(port: int, timeout: float = 30.0) -> bool:
     url = f"http://127.0.0.1:{port}/api/health"
     deadline = time.time() + timeout
@@ -247,6 +291,7 @@ def main() -> int:
     # I processi figli di WebKit devono usare le librerie di sistema, non quelle
     # del bundle: ripristina LD_LIBRARY_PATH prima di far partire la webview.
     _restore_system_library_path()
+    _integrate_appimage()  # icona su Wayland + voce nel menu applicazioni
     url = f"http://127.0.0.1:{port}/"
     window = webview.create_window(
         APP_NAME, url, width=1280, height=820, min_size=(900, 600),

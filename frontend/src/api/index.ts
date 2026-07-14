@@ -56,10 +56,38 @@ export const marketApi = {
   fxRates: (pair?: string) =>
     api.get('/market/fx-rates', { params: pair ? { pair } : {} }),
   createInstrument: (data: object) => api.post('/market/instruments', data),
+  updateInstrument: (id: number, data: object) => api.patch(`/market/instruments/${id}`, data),
   instrumentDetail: (id: number) =>
     api.get(`/market/instruments/${id}/detail`),
   instrumentPriceChart: (id: number, period: string) =>
     api.get(`/market/instruments/${id}/price-chart`, { params: { period } }),
+  // Fonti prezzo alternative a Yahoo
+  addManualPrice: (id: number, data: { date: string; price: number }) =>
+    api.post(`/market/instruments/${id}/prices`, data),
+  deleteManualPrice: (id: number, date: string) =>
+    api.delete(`/market/instruments/${id}/prices/${date}`),
+  testCustomSource: (data: {
+    url: string; jsonpath_price: string; jsonpath_date?: string | null
+    isin?: string | null; ticker?: string | null
+  }) => api.post('/market/instruments/custom-source/test', data),
+  refreshInstrumentPrice: (id: number) =>
+    api.post(`/market/instruments/${id}/refresh-price`),
+}
+
+// ── Cedole (piano cedolare certificati) ───────────────────────────────────────
+export const couponApi = {
+  list: (instrument_id: number) =>
+    api.get('/coupons/', { params: { instrument_id } }),
+  upcoming: (portfolio_id?: number) =>
+    api.get('/coupons/upcoming', { params: portfolio_id ? { portfolio_id } : {} }),
+  create: (data: object) => api.post('/coupons/', data),
+  bulk: (rows: object[]) => api.post('/coupons/bulk', rows),
+  update: (id: number, data: object) => api.put(`/coupons/${id}`, data),
+  delete: (id: number) => api.delete(`/coupons/${id}`),
+  confirm: (id: number, data: { portfolio_id: number; gross_amount: number; date?: string; tax_amount?: number }) =>
+    api.post(`/coupons/${id}/confirm`, data),
+  skip: (id: number) => api.post(`/coupons/${id}/skip`),
+  reset: (id: number) => api.post(`/coupons/${id}/reset`),
 }
 
 // ── Performance ───────────────────────────────────────────────────────────────

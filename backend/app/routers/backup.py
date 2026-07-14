@@ -40,7 +40,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-SCHEMA_VERSION = 1
+# v2: fonte prezzo (price_source + config JSON custom), piano cedolare e storico
+# prezzi degli strumenti non-Yahoo (che un restore non può riscaricare).
+SCHEMA_VERSION = 2
 APP_VERSION = "0.9.0"
 
 
@@ -149,6 +151,24 @@ def _build_backup(user: models.User, db: Session) -> dict:
             "currency": i.currency,
             "sector": i.sector,
             "country": i.country,
+            "price_source": i.price_source.value if i.price_source else "YAHOO",
+            "custom_url": i.custom_url,
+            "custom_jsonpath_price": i.custom_jsonpath_price,
+            "custom_jsonpath_date": i.custom_jsonpath_date,
+            "coupon_schedule": [{
+                "payment_date": c.payment_date.isoformat(),
+                "observation_date": c.observation_date.isoformat() if c.observation_date else None,
+                "amount_per_unit": c.amount_per_unit,
+                "coupon_type": c.coupon_type.value,
+                "memory_effect": c.memory_effect,
+                "status": c.status.value,
+                "notes": c.notes,
+            } for c in i.coupon_schedule],
+            # Solo per fonti manuali/custom: Yahoo si riscarica, questi no.
+            "price_history": [
+                {"date": r.date.isoformat(), "price": r.close_price}
+                for r in sorted(i.price_history, key=lambda r: r.date)
+            ] if i.price_source != models.PriceSource.YAHOO else [],
         } for i in instruments],
         "portfolios": [{
             "name": p.name,
@@ -357,6 +377,10 @@ def _get_or_create_instrument(spec: dict, db: Session) -> models.Instrument | No
         asset_class = models.AssetClass(spec.get("asset_class") or "EQUITY")
     except ValueError:
         asset_class = models.AssetClass.EQUITY
+    try:
+        price_source = models.PriceSource(spec.get("price_source") or "YAHOO")
+    except ValueError:
+        price_source = models.PriceSource.YAHOO
     inst = models.Instrument(
         ticker=ticker or (isin or ""),
         isin=isin,
@@ -365,10 +389,63 @@ def _get_or_create_instrument(spec: dict, db: Session) -> models.Instrument | No
         currency=spec.get("currency") or "USD",
         sector=spec.get("sector"),
         country=spec.get("country"),
+        price_source=price_source,
+        custom_url=spec.get("custom_url"),
+        custom_jsonpath_price=spec.get("custom_jsonpath_price"),
+        custom_jsonpath_date=spec.get("custom_jsonpath_date"),
     )
     db.add(inst)
     db.flush()
     return inst
+
+
+def _import_instrument_extras(spec: dict, inst: models.Instrument, db: Session, result: dict):
+    """Piano cedolare e storico prezzi (fonti non-Yahoo) dal backup v2.
+    Merge idempotente senza UniqueConstraint dedicate: una riga è un duplicato
+    se coincide su (data pagamento, importo) / (data, prezzo già presente)."""
+    existing_coupons = {
+        (c.payment_date, c.amount_per_unit)
+        for c in db.query(models.CouponSchedule)
+        .filter(models.CouponSchedule.instrument_id == inst.id).all()
+    }
+    for c in spec.get("coupon_schedule", []) or []:
+        d = _parse_date(c.get("payment_date"))
+        amount = c.get("amount_per_unit")
+        if d is None or not amount or (d, amount) in existing_coupons:
+            continue
+        try:
+            ctype = models.CouponType(c.get("coupon_type") or "CONDITIONAL")
+            status = models.CouponStatus(c.get("status") or "PLANNED")
+        except ValueError:
+            continue
+        db.add(models.CouponSchedule(
+            instrument_id=inst.id,
+            payment_date=d,
+            observation_date=_parse_date(c.get("observation_date")),
+            amount_per_unit=amount,
+            coupon_type=ctype,
+            memory_effect=bool(c.get("memory_effect")),
+            status=status,   # il link all'evento non sopravvive al restore
+            notes=c.get("notes"),
+        ))
+        existing_coupons.add((d, amount))
+        result["coupons_imported"] += 1
+
+    existing_prices = {
+        r.date for r in db.query(models.PriceHistory)
+        .filter(models.PriceHistory.instrument_id == inst.id).all()
+    }
+    for p in spec.get("price_history", []) or []:
+        d = _parse_date(p.get("date"))
+        price = p.get("price")
+        if d is None or price is None or d in existing_prices:
+            continue
+        db.add(models.PriceHistory(
+            instrument_id=inst.id, date=d,
+            close_price=price, currency=inst.currency,
+        ))
+        existing_prices.add(d)
+        result["prices_imported"] += 1
 
 
 def _parse_date(s) -> date | None:
@@ -389,11 +466,14 @@ def _do_import(data: dict, user: models.User, db: Session, dry_run: bool):
         "transactions_skipped": 0,
         "dividends_imported": 0,
         "dividends_skipped": 0,
+        "coupons_imported": 0,
+        "prices_imported": 0,
         "errors": [],
     }
     touched_instruments: set[int] = set()   # per il fetch prezzi post-import
 
-    # Pre-crea gli strumenti dal blocco `instruments` (metadati completi).
+    # Pre-crea gli strumenti dal blocco `instruments` (metadati completi),
+    # poi importa gli extra v2 (piano cedolare + prezzi delle fonti non-Yahoo).
     for spec in data.get("instruments", []):
         existing = _instrument_lookup(spec, db)
         inst = _get_or_create_instrument(spec, db)
@@ -401,6 +481,7 @@ def _do_import(data: dict, user: models.User, db: Session, dry_run: bool):
             touched_instruments.add(inst.id)
             if existing is None:
                 result["instruments_created"] += 1
+            _import_instrument_extras(spec, inst, db, result)
 
     existing_pf = {p.name: p for p in _user_portfolios(user, db)}
 

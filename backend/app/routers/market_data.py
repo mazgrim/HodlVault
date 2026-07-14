@@ -97,6 +97,113 @@ def create_instrument(
     return inst
 
 
+@router.patch("/instruments/{instrument_id}", response_model=schemas.InstrumentOut)
+def update_instrument(
+    instrument_id: int,
+    payload: schemas.InstrumentUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_write),
+):
+    """Aggiorna anagrafica e fonte prezzo. Cambiare fonte/config azzera l'ultimo
+    errore di fetch (la nuova config riparte pulita); i prezzi già in storico
+    restano validi qualunque sia la fonte."""
+    inst = db.query(models.Instrument).filter(models.Instrument.id == instrument_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Strumento non trovato")
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(inst, field, value)
+    if {"price_source", "custom_url", "custom_jsonpath_price", "custom_jsonpath_date"} & data.keys():
+        inst.price_fetch_error = None
+        inst.price_fetch_error_at = None
+    db.commit()
+    db.refresh(inst)
+    return inst
+
+
+@router.post("/instruments/custom-source/test", response_model=schemas.CustomSourceTestOut)
+async def test_custom_source(
+    payload: schemas.CustomSourceTestIn,
+    current_user: models.User = Depends(require_write),
+):
+    """Chiamata di prova della fonte JSON: fetch + estrazione, nessun salvataggio."""
+    from ..services.custom_price import CustomPriceError, fetch_custom_price
+
+    try:
+        price, price_date, resolved = await fetch_custom_price(
+            payload.url, payload.jsonpath_price, payload.jsonpath_date,
+            isin=payload.isin, ticker=payload.ticker,
+        )
+    except CustomPriceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return schemas.CustomSourceTestOut(price=price, price_date=price_date, resolved_url=resolved)
+
+
+@router.post("/instruments/{instrument_id}/prices", response_model=schemas.PriceHistoryOut, status_code=201)
+def upsert_manual_price(
+    instrument_id: int,
+    payload: schemas.ManualPriceIn,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_write),
+):
+    """Inserisce/aggiorna una quotazione (data + prezzo, valuta dello strumento).
+    Pensato per la fonte manuale, ma utilizzabile anche per correggere un punto
+    di una fonte custom."""
+    inst = db.query(models.Instrument).filter(models.Instrument.id == instrument_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Strumento non trovato")
+    svc = MarketService(db)
+    svc._upsert_price(instrument_id, payload.date, payload.price, inst.currency)
+    db.commit()
+    row = db.query(models.PriceHistory).filter(
+        models.PriceHistory.instrument_id == instrument_id,
+        models.PriceHistory.date == payload.date,
+    ).first()
+    return row
+
+
+@router.delete("/instruments/{instrument_id}/prices/{price_date}", status_code=204)
+def delete_manual_price(
+    instrument_id: int,
+    price_date: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_write),
+):
+    from datetime import date as _date
+    try:
+        d = _date.fromisoformat(price_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Data non valida (attesa ISO YYYY-MM-DD)")
+    row = db.query(models.PriceHistory).filter(
+        models.PriceHistory.instrument_id == instrument_id,
+        models.PriceHistory.date == d,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Quotazione non trovata")
+    db.delete(row)
+    db.commit()
+
+
+@router.post("/instruments/{instrument_id}/refresh-price", response_model=schemas.InstrumentOut)
+async def refresh_instrument_price(
+    instrument_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_write),
+):
+    """Refresh immediato del prezzo di un singolo strumento CUSTOM_JSON
+    (il pulsante "Aggiorna ora" della pagina strumento)."""
+    inst = db.query(models.Instrument).filter(models.Instrument.id == instrument_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Strumento non trovato")
+    if inst.price_source != models.PriceSource.CUSTOM_JSON:
+        raise HTTPException(status_code=400, detail="Refresh disponibile solo per fonte JSON custom")
+    svc = MarketService(db)
+    await svc.refresh_custom_price(inst)
+    db.commit()
+    db.refresh(inst)
+    return inst
+
+
 @router.get("/instruments/lookup")
 async def lookup_instrument(
     isin: Optional[str] = Query(None),
@@ -159,6 +266,9 @@ def instrument_detail(
 
     buy_dates = [tx.date.isoformat() for tx in txs if tx.type == models.TransactionType.BUY]
 
+    svc = MarketService(db)
+    last_price_date = svc.latest_price_date(instrument_id)
+
     return {
         "instrument": {
             "id": inst.id,
@@ -169,6 +279,13 @@ def instrument_detail(
             "currency": inst.currency,
             "sector": inst.sector,
             "country": inst.country,
+            "price_source": inst.price_source.value if inst.price_source else "YAHOO",
+            "custom_url": inst.custom_url,
+            "custom_jsonpath_price": inst.custom_jsonpath_price,
+            "custom_jsonpath_date": inst.custom_jsonpath_date,
+            "price_fetch_error": inst.price_fetch_error,
+            "price_fetch_error_at": inst.price_fetch_error_at.isoformat() if inst.price_fetch_error_at else None,
+            "last_price_date": last_price_date.isoformat() if last_price_date else None,
         },
         "position": {
             "quantity":            position.quantity,

@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field, field_validator, computed_field
-from .models import TransactionType, DividendType, AssetClass
+from .models import TransactionType, DividendType, AssetClass, PriceSource, CouponType, CouponStatus
 
 # Alias to the date type. Some models have a field literally named `date`; an
 # annotated assignment like `date: Optional[date] = None` rebinds `date` to the
@@ -97,6 +97,23 @@ class InstrumentCreate(BaseModel):
     currency: str = "USD"
     sector: Optional[str] = None
     country: Optional[str] = None
+    price_source: PriceSource = PriceSource.YAHOO
+    custom_url: Optional[str] = None
+    custom_jsonpath_price: Optional[str] = None
+    custom_jsonpath_date: Optional[str] = None
+
+class InstrumentUpdate(BaseModel):
+    ticker: Optional[str] = None
+    isin: Optional[str] = None
+    name: Optional[str] = None
+    asset_class: Optional[AssetClass] = None
+    currency: Optional[str] = None
+    sector: Optional[str] = None
+    country: Optional[str] = None
+    price_source: Optional[PriceSource] = None
+    custom_url: Optional[str] = None
+    custom_jsonpath_price: Optional[str] = None
+    custom_jsonpath_date: Optional[str] = None
 
 class InstrumentOut(BaseModel):
     id: int
@@ -107,7 +124,30 @@ class InstrumentOut(BaseModel):
     currency: str
     sector: Optional[str]
     country: Optional[str]
+    price_source: PriceSource = PriceSource.YAHOO
+    custom_url: Optional[str] = None
+    custom_jsonpath_price: Optional[str] = None
+    custom_jsonpath_date: Optional[str] = None
+    price_fetch_error: Optional[str] = None
+    price_fetch_error_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
+
+class ManualPriceIn(BaseModel):
+    date: date
+    price: float = Field(gt=0)
+
+class CustomSourceTestIn(BaseModel):
+    """Prova di configurazione fonte JSON: fetch + estrazione senza salvare."""
+    url: str
+    jsonpath_price: str
+    jsonpath_date: Optional[str] = None
+    isin: Optional[str] = None
+    ticker: Optional[str] = None
+
+class CustomSourceTestOut(BaseModel):
+    price: float
+    price_date: date
+    resolved_url: str
 
 
 # ── Transaction ───────────────────────────────────────────────────────────────
@@ -198,6 +238,65 @@ class DividendOut(BaseModel):
         return round(self.tax_amount / base, 4) if base > 0 else 0.0
 
     model_config = {"from_attributes": True}
+
+
+# ── Coupon schedule (certificati) ─────────────────────────────────────────────
+
+class CouponCreate(BaseModel):
+    instrument_id: int
+    payment_date: date
+    observation_date: Optional[_Date] = None
+    amount_per_unit: float = Field(gt=0)   # per unità, valuta strumento
+    coupon_type: CouponType = CouponType.CONDITIONAL
+    memory_effect: bool = False
+    notes: Optional[str] = None
+
+class CouponUpdate(BaseModel):
+    payment_date: Optional[_Date] = None
+    observation_date: Optional[_Date] = None
+    amount_per_unit: Optional[float] = Field(default=None, gt=0)
+    coupon_type: Optional[CouponType] = None
+    memory_effect: Optional[bool] = None
+    notes: Optional[str] = None
+
+class CouponOut(BaseModel):
+    id: int
+    instrument_id: int
+    payment_date: date
+    observation_date: Optional[date]
+    amount_per_unit: float
+    coupon_type: CouponType
+    memory_effect: bool
+    status: CouponStatus
+    dividend_event_id: Optional[int]
+    notes: Optional[str]
+    model_config = {"from_attributes": True}
+
+class UpcomingCoupon(BaseModel):
+    """Riga del calendario "Prossime Cedole" (pagina Dividendi): cedola PLANNED
+    di uno strumento in posizione, con stima del lordo sulla quantità detenuta."""
+    id: int
+    instrument_id: int
+    ticker: str
+    name: str
+    currency: str
+    payment_date: date
+    observation_date: Optional[date]
+    amount_per_unit: float
+    coupon_type: CouponType
+    memory_effect: bool
+    quantity: float               # quantità detenuta (nei portafogli filtrati)
+    estimated_total: float        # lordo stimato = amount_per_unit × quantity (valuta strumento)
+    estimated_total_eur: float    # convertito all'ultimo cambio noto
+
+class CouponConfirm(BaseModel):
+    """Conferma di pagamento: il lordo effettivo può differire dal piano
+    (es. cedole in memoria recuperate). Le tasse, se non fornite, sono
+    stimate al 26% (imposta sostitutiva certificati)."""
+    portfolio_id: int
+    gross_amount: float = Field(gt=0)               # LORDO totale, valuta strumento
+    date: Optional[_Date] = None                    # default: payment_date del piano
+    tax_amount: Optional[float] = Field(default=None, ge=0)  # override manuale
 
 
 # ── Market data ───────────────────────────────────────────────────────────────

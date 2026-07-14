@@ -42,6 +42,13 @@ npm install
 npm run dev
 ```
 
+### Backend tests
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest            # suite in backend/tests — SQLite in-memory, nessuna rete
+```
+
 ### Other useful commands
 ```bash
 docker compose -f docker-compose.dev.yml logs -f backend   # tail backend logs
@@ -80,9 +87,9 @@ backend/app/
 
 ### Database
 
-SQLite stored in a Docker volume (`/data/hodlvault.db`). Tables are created via `Base.metadata.create_all` on startup — **there are no Alembic migrations**. Schema changes require manual migration or a DB reset.
+SQLite stored in a Docker volume (`/data/hodlvault.db`). Tables are created via `Base.metadata.create_all` on startup; **schema changes go through `app/migrations.py`** (no Alembic): version tracked with `PRAGMA user_version`, one function per step in `MIGRATIONS`, atomic transactions with automatic pre-migration file backup in `data/backups/`. Bump `TARGET_VERSION` when adding a step.
 
-Key tables: `users`, `portfolios`, `instruments`, `transactions`, `dividend_events`, `price_history`, `fx_rates`.
+Key tables: `users`, `portfolios`, `instruments`, `transactions`, `dividend_events`, `price_history`, `coupon_schedules`, `fx_rates`.
 
 `FxRate.pair` stores the currency code (`"USD"`, `"GBP"`…), not the full pair string. The stored `rate` (and `fx_rate` on transactions/dividends) is the **number of original-currency units per 1 EUR** — i.e. the Yahoo `EUR<CCY>=X` quote (USD ≈ 1.08, GBP ≈ 0.85). To convert to EUR you **divide**: `price_eur = price / fx_rate`. EUR rows are `1.0`. All displayed values are converted to EUR at query time using the latest stored FX rate.
 
@@ -91,6 +98,16 @@ Key tables: `users`, `portfolios`, `instruments`, `transactions`, `dividend_even
 **The yfinance library is NOT a dependency.** `MarketService` (`services/market.py`) calls the Yahoo Finance chart API directly via `httpx` (`query1.finance.yahoo.com/v8/finance/chart/{ticker}`, with fallback to `query2`). This is intentional — the yfinance Python library had issues in this environment.
 
 Prices are refreshed nightly via APScheduler (default 18:00, configurable via `PRICE_UPDATE_HOUR`). The sidebar "Aggiorna prezzi" button calls `POST /api/market/refresh` to force an immediate refresh.
+
+### Fonti prezzo alternative (`Instrument.price_source`)
+
+Ogni strumento ha una fonte prezzo: `YAHOO` (default), `MANUAL` (quotazioni inserite a mano via `POST /api/market/instruments/{id}/prices`; la UI avvisa se l'ultimo prezzo ha >7 giorni) o `CUSTOM_JSON` (fetch da endpoint configurato sullo strumento: `custom_url` con placeholder `{ISIN}`/`{TICKER}`, `custom_jsonpath_price`, `custom_jsonpath_date` opzionale — estrazione via `jsonpath-ng` in `services/custom_price.py`). Serve per asset non su Yahoo, es. certificati SeDeX/Cert-X.
+
+Il refresh notturno partiziona per fonte: Yahoo come sempre, custom via endpoint (un fallimento registra l'errore in `Instrument.price_fetch_error` e mantiene l'ultimo prezzo, senza rompere il resto), manuali mai toccati. Tutti i prezzi finiscono in `price_history`, quindi grafici e calcoli funzionano identici per ogni fonte. `POST /api/market/instruments/custom-source/test` prova una config senza salvare (pulsante "Testa configurazione" in UI); `POST /api/market/instruments/{id}/refresh-price` forza il refresh di un singolo strumento custom. Enrichment, storico Yahoo e sync dividendi saltano gli strumenti non-Yahoo.
+
+### Piano cedolare certificati (`coupon_schedules`, `routers/coupons.py`)
+
+Il piano cedole è un dato dello **strumento** (come `price_history`), con righe `(observation_date?, payment_date, amount_per_unit, coupon_type GUARANTEED|CONDITIONAL, memory_effect, status PLANNED|PAID|SKIPPED)`. **`amount_per_unit` è l'importo per unità nella valuta dello strumento** (coerente coi dividendi Yahoo per-share): totale = per-unità × quantità. Le righe PLANNED/SKIPPED non toccano MAI i calcoli. `POST /api/coupons/{id}/confirm` (lordo effettivo, può includere cedole in memoria recuperate) crea un `DividendEvent` di tipo `CERT_COUPON` nel portafoglio scelto — da lì segue il flusso dividendi standard. Cancellare l'incasso dalla pagina Dividendi riporta la cedola a PLANNED. UI: sezione "Piano Cedole" in `InstrumentDetail` (`components/CouponScheduleSection.tsx`); la pagina Dividendi mostra inoltre il calendario "Prossime Cedole" (`GET /api/coupons/upcoming`: le PLANNED degli strumenti in posizione, con lordo stimato = per-unità × quantità detenuta — solo visualizzazione, separata dallo storico incassi e dalla proiezione).
 
 ### Auth
 
@@ -142,8 +159,9 @@ Standalone financial calculators backed by `/api/tools`, organised in tabs: **In
 | `LOGIN_ATTEMPT_RETENTION_DAYS` | `90` | Days the login access log is kept before pruning |
 | `TAX_RATE_DIVIDEND` | `0.26` | Imposta sostitutiva italiana sui dividendi azionari/ETF |
 | `TAX_RATE_COUPON` | `0.125` | Imposta sostitutiva sulle cedole bond / titoli di Stato |
+| `TAX_RATE_CERTIFICATE` | `0.26` | Imposta sulle cedole di certificati (`CERT_COUPON`, no ritenuta estera) |
 | `FOREIGN_WHT_<ISO>` | — | Override ritenuta estera per paese (es. `FOREIGN_WHT_US=0.30`) |
 
 ### Dividendi: storico, tassazione, sync (`services/tax.py`, `DividendCalculator.sync_from_market`)
 
-`DividendEvent` registra il **lordo** (`gross_amount`), la **ritenuta estera** (`foreign_tax_amount`), l'**imposta italiana** (`tax_amount`) e il **rateo cedolare** (`accrued_interest`); `amount` è il **netto** (= lordo − tasse), quindi il P&L realizzato (`_calc_realized_dividends`) è già al netto. `services/tax.py::compute_net` stima la doppia imposizione (ritenuta estera per paese da `Instrument.country` + 26%/12,5% italiano sul netto frontiera); se il CSV del broker fornisce la ritenuta reale (es. Trade Republic) quella ha la precedenza. `POST /api/dividends/sync` recupera da Yahoo (`chart` con `events=div`) lo storico dividendi degli strumenti posseduti e crea gli eventi proporzionali alle quote detenute alla ex-date (idempotente via UniqueConstraint). Le 4 colonne sono aggiunte a startup da `_ensure_dividend_columns` in `main.py` (ALTER idempotente, niente Alembic).
+`DividendEvent` registra il **lordo** (`gross_amount`), la **ritenuta estera** (`foreign_tax_amount`), l'**imposta italiana** (`tax_amount`) e il **rateo cedolare** (`accrued_interest`); `amount` è il **netto** (= lordo − tasse), quindi il P&L realizzato (`_calc_realized_dividends`) è già al netto. `services/tax.py::compute_net` stima la doppia imposizione (ritenuta estera per paese da `Instrument.country` + 26%/12,5% italiano sul netto frontiera); se il CSV del broker fornisce la ritenuta reale (es. Trade Republic) quella ha la precedenza. `POST /api/dividends/sync` recupera da Yahoo (`chart` con `events=div`) lo storico dividendi degli strumenti posseduti (solo fonte YAHOO) e crea gli eventi proporzionali alle quote detenute alla ex-date (idempotente via UniqueConstraint). `DividendType` ha tre valori: `DIVIDEND` (26%), `COUPON` (bond, 12,5%), `CERT_COUPON` (cedole certificati, 26%, niente ritenuta estera — sottotipo tracciato per future distinzioni fiscali: le condizionate sono redditi diversi). Le colonne lordo/tasse/rateo sono state aggiunte dalla migrazione v1 in `app/migrations.py`.

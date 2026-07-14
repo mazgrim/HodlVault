@@ -1130,10 +1130,12 @@ class DividendCalculator:
             by_key[(tx.portfolio_id, tx.instrument_id)].append(tx)
             instruments[tx.instrument_id] = tx.instrument
 
-        # Fetch dividend history once per instrument (cached across portfolios)
+        # Fetch dividend history once per instrument (cached across portfolios).
+        # Gli strumenti con fonte prezzo manuale/custom non sono su Yahoo: le
+        # loro cedole si gestiscono col piano cedolare, non col sync.
         history: Dict[int, List[tuple]] = {}
         for iid, inst in instruments.items():
-            if not inst or not inst.ticker:
+            if not inst or not inst.ticker or inst.price_source != models.PriceSource.YAHOO:
                 continue
             try:
                 history[iid] = await self.market.fetch_dividend_history(inst.ticker)

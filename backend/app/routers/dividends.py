@@ -114,6 +114,14 @@ def delete_dividend(
     ).first()
     if not ev:
         raise HTTPException(status_code=404, detail="Evento non trovato")
+    # Se l'incasso era nato dalla conferma di una cedola, la riga del piano
+    # torna "prevista" (è così che si annulla una conferma errata).
+    linked = db.query(models.CouponSchedule).filter(
+        models.CouponSchedule.dividend_event_id == ev.id
+    ).all()
+    for coupon in linked:
+        coupon.status = models.CouponStatus.PLANNED
+        coupon.dividend_event_id = None
     db.delete(ev)
     db.commit()
 

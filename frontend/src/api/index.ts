@@ -84,7 +84,7 @@ export const couponApi = {
   bulk: (rows: object[]) => api.post('/coupons/bulk', rows),
   update: (id: number, data: object) => api.put(`/coupons/${id}`, data),
   delete: (id: number) => api.delete(`/coupons/${id}`),
-  confirm: (id: number, data: { portfolio_id: number; gross_amount: number; date?: string; tax_amount?: number }) =>
+  confirm: (id: number, data: { portfolio_id: number; gross_amount: number; date?: string; tax_amount?: number; minus_compensation?: boolean }) =>
     api.post(`/coupons/${id}/confirm`, data),
   skip: (id: number) => api.post(`/coupons/${id}/skip`),
   reset: (id: number) => api.post(`/coupons/${id}/reset`),
@@ -108,6 +108,8 @@ export const divApi = {
     api.get('/dividends/', { params: portfolio_id ? { portfolio_id } : {} }),
   create: (data: object) => api.post('/dividends/', data),
   delete: (id: number) => api.delete(`/dividends/${id}`),
+  toggleMinus: (id: number, minus_compensation: boolean) =>
+    api.patch(`/dividends/${id}/minus-compensation`, { minus_compensation }),
   sync: (portfolio_id?: number) =>
     api.post('/dividends/sync', null, { params: portfolio_id ? { portfolio_id } : {} }),
   kpis: (portfolio_id?: number) =>

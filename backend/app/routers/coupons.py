@@ -200,7 +200,11 @@ async def confirm_coupon(
     inst = row.instrument
     ev_date = payload.date or row.payment_date
 
-    if payload.tax_amount is not None:
+    if payload.minus_compensation:
+        # Compensazione minusvalenze: imposta assorbita dallo zainetto fiscale.
+        gross = payload.gross_amount
+        net, foreign_tax, italian_tax = gross, 0.0, 0.0
+    elif payload.tax_amount is not None:
         # Tassa fornita manualmente (es. dal rendiconto del broker)
         gross = payload.gross_amount
         net, foreign_tax, italian_tax = gross - payload.tax_amount, 0.0, payload.tax_amount
@@ -222,6 +226,7 @@ async def confirm_coupon(
         currency=inst.currency,
         fx_rate=fx,
         type=models.DividendType.CERT_COUPON,
+        minus_compensation=payload.minus_compensation,
     )
     db.add(ev)
     try:

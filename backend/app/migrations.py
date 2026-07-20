@@ -28,7 +28,7 @@ from sqlalchemy.engine import Engine
 logger = logging.getLogger(__name__)
 
 # Alza questo numero quando aggiungi una migrazione in MIGRATIONS.
-TARGET_VERSION = 2
+TARGET_VERSION = 3
 
 
 # ── Migrazioni ────────────────────────────────────────────────────────────────
@@ -75,10 +75,22 @@ def _migration_2_price_sources(cur):
     cur.execute("UPDATE instruments SET price_source = 'YAHOO' WHERE price_source IS NULL")
 
 
+def _migration_3_minus_compensation(cur):
+    """
+    Flag "compensazione minusvalenza" sugli incassi (cedole certificati): quando
+    attivo l'imposta è assorbita dallo zainetto fiscale e il netto coincide col
+    lordo. Gli eventi esistenti restano non compensati.
+    """
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(dividend_events)").fetchall()}
+    if "minus_compensation" not in existing:
+        cur.execute("ALTER TABLE dividend_events ADD COLUMN minus_compensation BOOLEAN NOT NULL DEFAULT 0")
+
+
 # Mappa versione → funzione. Le chiavi devono essere consecutive a partire da 1.
 MIGRATIONS = {
     1: _migration_1_baseline,
     2: _migration_2_price_sources,
+    3: _migration_3_minus_compensation,
 }
 
 

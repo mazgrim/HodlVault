@@ -1013,12 +1013,23 @@ class DividendCalculator:
             DividendEvent.date >= cutoff,
         ).all()
 
-        monthly: Dict[str, float] = defaultdict(float)
+        # Netto per mese, separato tra dividendi e cedole (bond + certificati)
+        # per il grafico impilato "Dividendi/Cedole".
+        monthly: Dict[str, Dict[str, float]] = defaultdict(lambda: {"dividends": 0.0, "coupons": 0.0})
         for ev in events:
             key = f"{ev.date.year}-{ev.date.month:02d}"
-            monthly[key] += ev.amount / (ev.fx_rate or 1.0)
+            bucket = "dividends" if ev.type == DividendType.DIVIDEND else "coupons"
+            monthly[key][bucket] += ev.amount / (ev.fx_rate or 1.0)
 
-        return [schemas.MonthlyDividend(month=k, amount=round(v, 2)) for k, v in sorted(monthly.items())]
+        return [
+            schemas.MonthlyDividend(
+                month=k,
+                amount=round(v["dividends"] + v["coupons"], 2),
+                dividends=round(v["dividends"], 2),
+                coupons=round(v["coupons"], 2),
+            )
+            for k, v in sorted(monthly.items())
+        ]
 
     def projection_12_months(self, portfolio_id: Optional[int] = None) -> List[schemas.DividendProjection]:
         pids = _user_portfolio_ids(self.user_id, self.db, portfolio_id)

@@ -8,15 +8,15 @@ import { usePortfolios } from '../context/PortfoliosContext'
 import { divApi, couponApi } from '../api'
 import { fmtEur, fmtPct, fmtDate, fmtMonth, fmtNum } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
-import { Landmark, TrendingUp, Calendar, Search, X, Trash2, RefreshCw, Receipt, CalendarClock } from 'lucide-react'
+import { Landmark, TrendingUp, Calendar, Search, X, Trash2, RefreshCw, Receipt, CalendarClock, Scale } from 'lucide-react'
 
 interface DividendEvent {
   id: number; instrument_id: number; date: string; amount: number; currency: string; fx_rate: number
   gross_amount: number | null; foreign_tax_amount: number; tax_amount: number; accrued_interest: number
-  foreign_tax_rate: number; italian_tax_rate: number
+  foreign_tax_rate: number; italian_tax_rate: number; minus_compensation: boolean
   type: string; instrument: { ticker: string; name: string; isin: string | null }
 }
-interface MonthlyDiv { month: string; amount: number }
+interface MonthlyDiv { month: string; amount: number; dividends: number; coupons: number }
 interface DivProjection { month: string; amount: number }
 interface UpcomingCoupon {
   id: number; instrument_id: number; ticker: string; name: string; currency: string
@@ -157,6 +157,24 @@ export default function Dividends() {
     }
   }
 
+  const [togglingId, setTogglingId] = useState<number | null>(null)
+  const handleToggleMinus = async (ev: DividendEvent) => {
+    setTogglingId(ev.id)
+    try {
+      const res = await divApi.toggleMinus(ev.id, !ev.minus_compensation)
+      setEvents(prev => prev.map(e => (e.id === ev.id ? { ...e, ...res.data } : e)))
+      // Tasse e netto sono cambiati: aggiorna KPI e grafico senza spinner globale
+      const [kRes, mRes] = await Promise.all([
+        divApi.kpis(selectedPf ?? undefined),
+        divApi.monthly(selectedPf ?? undefined),
+      ])
+      setKpis(kRes.data)
+      setMonthly(mRes.data)
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
   const handleSync = async () => {
     setSyncing(true)
     setSyncMsg(null)
@@ -179,7 +197,7 @@ export default function Dividends() {
 
   if (pfLoading) return <PageSpinner />
 
-  const barData  = monthly.map(m => ({ month: fmtMonth(m.month), importo: m.amount }))
+  const barData  = monthly.map(m => ({ month: fmtMonth(m.month), Dividendi: m.dividends, Cedole: m.coupons }))
   const projData = projection.map(p => ({ month: fmtMonth(p.month), importo: p.amount }))
 
   return (
@@ -215,7 +233,7 @@ export default function Dividends() {
 
           {/* Monthly bar chart */}
           <div className="card">
-            <h2 className="text-base font-semibold text-gray-200 mb-4">Dividendi Ultimi 12 Mesi</h2>
+            <h2 className="text-base font-semibold text-gray-200 mb-4">Dividendi/Cedole Ultimi 12 Mesi</h2>
             {barData.length === 0 ? (
               <div className="h-48 flex items-center justify-center text-gray-500 text-sm">
                 Nessun dividendo registrato
@@ -227,11 +245,13 @@ export default function Dividends() {
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tickFormatter={v => `€${v}`} tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={(v: number) => [fmtEur(v), 'Importo']}
+                    formatter={(v: number, name: string) => [fmtEur(v), name]}
                     contentStyle={tooltip()}
                     cursor={barCursor}
                   />
-                  <Bar dataKey="importo" fill="#D4A017" radius={[4, 4, 0, 0]} />
+                  {/* Barre impilate: l'altezza è la somma, il tooltip tiene le voci separate */}
+                  <Bar dataKey="Dividendi" stackId="dc" fill="#D4A017" />
+                  <Bar dataKey="Cedole" stackId="dc" fill={neutralSeries} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -509,7 +529,9 @@ export default function Dividends() {
                             const netEur = ev.amount / fx
                             const fRate = Math.round((ev.foreign_tax_rate || 0) * 1000) / 10
                             const iRate = Math.round((ev.italian_tax_rate || 0) * 1000) / 10
-                            const rateLabel = fRate > 0 ? `Est. ${fRate}% + IT ${iRate}%` : (iRate > 0 ? `IT ${iRate}%` : '—')
+                            const rateLabel = ev.minus_compensation
+                              ? 'Comp. minus'
+                              : fRate > 0 ? `Est. ${fRate}% + IT ${iRate}%` : (iRate > 0 ? `IT ${iRate}%` : '—')
                             return (
                               <>
                                 <td className="py-2.5 pr-4 tabular-nums text-gray-300">{fmtEur(grossEur)}</td>
@@ -525,7 +547,23 @@ export default function Dividends() {
                               </>
                             )
                           })()}
-                          <td className="py-2.5">
+                          <td className="py-2.5 whitespace-nowrap">
+                            {ev.type === 'CERT_COUPON' && (
+                              <button
+                                onClick={() => handleToggleMinus(ev)}
+                                disabled={togglingId === ev.id}
+                                className={`mr-2 transition-colors disabled:opacity-40 ${
+                                  ev.minus_compensation
+                                    ? 'text-gold-500 hover:text-gold-400'
+                                    : 'text-gray-600 hover:text-gray-300'
+                                }`}
+                                title={ev.minus_compensation
+                                  ? 'Compensazione minusvalenza attiva: nessuna tassa, netto = lordo. Clicca per disattivare (ricalcola la stima al 26%).'
+                                  : 'Attiva compensazione minusvalenza: azzera le tasse, netto = lordo.'}
+                              >
+                                <Scale size={14} />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDelete(ev.id)}
                               disabled={deletingId === ev.id}

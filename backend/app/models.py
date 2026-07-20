@@ -148,6 +148,9 @@ class DividendEvent(Base):
     currency = Column(String(8), default="EUR")
     fx_rate = Column(Float, default=1.0)
     type = Column(Enum(DividendType), default=DividendType.DIVIDEND)
+    # Compensazione minusvalenze (solo cedole certificati): l'imposta è assorbita
+    # dallo zainetto fiscale, quindi netto = lordo e tasse a zero.
+    minus_compensation = Column(Boolean, default=False, nullable=False)
 
     portfolio = relationship("Portfolio", back_populates="dividend_events")
     instrument = relationship("Instrument", back_populates="dividend_events")

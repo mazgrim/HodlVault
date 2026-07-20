@@ -193,3 +193,84 @@ def test_paid_coupon_cannot_be_edited_or_deleted(client, db, portfolio, certific
     })
     assert client.put(f"/api/coupons/{coupon['id']}", json={"amount_per_unit": 3.0}).status_code == 400
     assert client.delete(f"/api/coupons/{coupon['id']}").status_code == 400
+
+
+# ── Compensazione minusvalenze ────────────────────────────────────────────────
+
+def test_confirm_with_minus_compensation(client, db, portfolio, certificate):
+    """Flag attivo alla conferma: nessuna imposta, netto = lordo."""
+    coupon = _mk_coupon(client, certificate)
+    res = client.post(f"/api/coupons/{coupon['id']}/confirm", json={
+        "portfolio_id": portfolio.id,
+        "gross_amount": 250.0,
+        "minus_compensation": True,
+    })
+    assert res.status_code == 200, res.text
+    ev = res.json()
+    assert ev["minus_compensation"] is True
+    assert ev["gross_amount"] == 250.0
+    assert ev["tax_amount"] == 0.0
+    assert ev["foreign_tax_amount"] == 0.0
+    assert ev["amount"] == 250.0
+
+
+def test_toggle_minus_compensation_retroactively(client, db, portfolio, certificate):
+    """ON azzera le imposte (netto = lordo); OFF ricalcola la stima al 26%."""
+    coupon = _mk_coupon(client, certificate)
+    ev = client.post(f"/api/coupons/{coupon['id']}/confirm", json={
+        "portfolio_id": portfolio.id, "gross_amount": 250.0,
+    }).json()
+    assert ev["tax_amount"] == pytest.approx(250.0 * 0.26)
+
+    res = client.patch(f"/api/dividends/{ev['id']}/minus-compensation",
+                       json={"minus_compensation": True})
+    assert res.status_code == 200, res.text
+    on = res.json()
+    assert on["minus_compensation"] is True
+    assert on["tax_amount"] == 0.0
+    assert on["amount"] == 250.0
+
+    res = client.patch(f"/api/dividends/{ev['id']}/minus-compensation",
+                       json={"minus_compensation": False})
+    assert res.status_code == 200
+    off = res.json()
+    assert off["minus_compensation"] is False
+    assert off["tax_amount"] == pytest.approx(250.0 * 0.26)
+    assert off["amount"] == pytest.approx(250.0 * 0.74)
+
+
+def test_toggle_minus_rejected_for_non_cert_coupon(client, db, portfolio, certificate):
+    """La compensazione si applica solo alle cedole di certificati."""
+    ev = client.post("/api/dividends/", json={
+        "portfolio_id": portfolio.id, "instrument_id": certificate.id,
+        "date": "2026-06-01", "gross_amount": 100.0, "currency": "EUR",
+        "type": "DIVIDEND",
+    }).json()
+    res = client.patch(f"/api/dividends/{ev['id']}/minus-compensation",
+                       json={"minus_compensation": True})
+    assert res.status_code == 400
+
+
+def test_monthly_breakdown_splits_dividends_and_coupons(client, db, portfolio, certificate):
+    """/api/dividends/monthly separa dividendi e cedole; amount resta il totale."""
+    from datetime import timedelta
+
+    d = (date.today() - timedelta(days=30)).isoformat()
+    month_key = d[:7]
+
+    # Un dividendo con tasse manuali (netto noto: 74) e una cedola compensata (netto 250)
+    client.post("/api/dividends/", json={
+        "portfolio_id": portfolio.id, "instrument_id": certificate.id,
+        "date": d, "gross_amount": 100.0, "tax_amount": 26.0,
+        "currency": "EUR", "type": "DIVIDEND",
+    })
+    coupon = _mk_coupon(client, certificate, payment_date=d)
+    client.post(f"/api/coupons/{coupon['id']}/confirm", json={
+        "portfolio_id": portfolio.id, "gross_amount": 250.0, "minus_compensation": True,
+    })
+
+    rows = client.get("/api/dividends/monthly").json()
+    row = next(r for r in rows if r["month"] == month_key)
+    assert row["dividends"] == pytest.approx(74.0)
+    assert row["coupons"] == pytest.approx(250.0)
+    assert row["amount"] == pytest.approx(324.0)

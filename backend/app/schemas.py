@@ -223,6 +223,7 @@ class DividendOut(BaseModel):
     currency: str
     fx_rate: float
     type: DividendType
+    minus_compensation: bool = False
 
     @computed_field
     @property
@@ -297,6 +298,14 @@ class CouponConfirm(BaseModel):
     gross_amount: float = Field(gt=0)               # LORDO totale, valuta strumento
     date: Optional[_Date] = None                    # default: payment_date del piano
     tax_amount: Optional[float] = Field(default=None, ge=0)  # override manuale
+    # Compensazione minusvalenze: imposta assorbita dallo zainetto, netto = lordo.
+    minus_compensation: bool = False
+
+
+class DividendMinusUpdate(BaseModel):
+    """Toggle retroattivo della compensazione minusvalenza su un incasso
+    (solo CERT_COUPON). OFF ricalcola la stima standard delle imposte."""
+    minus_compensation: bool
 
 
 # ── Market data ───────────────────────────────────────────────────────────────
@@ -433,7 +442,9 @@ class DividendProjection(BaseModel):
 
 class MonthlyDividend(BaseModel):
     month: str
-    amount: float
+    amount: float           # totale netto (dividendi + cedole)
+    dividends: float = 0.0  # netto da DIVIDEND
+    coupons: float = 0.0    # netto da COUPON + CERT_COUPON
 
 
 # ── Import ────────────────────────────────────────────────────────────────────

@@ -101,6 +101,47 @@ async def sync_dividends(
     return {"created": created}
 
 
+@router.patch("/{div_id}/minus-compensation", response_model=schemas.DividendOut)
+def toggle_minus_compensation(
+    div_id: int,
+    payload: schemas.DividendMinusUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_write),
+):
+    """Attiva/disattiva retroattivamente la compensazione minusvalenza su un
+    incasso cedola certificato. ON: imposta a zero, netto = lordo. OFF: ricalcola
+    la stima standard (eventuali tasse manuali inserite alla conferma vanno perse)."""
+    from ..services.tax import compute_net
+
+    pids = _user_portfolio_ids(current_user.id, db)
+    ev = db.query(models.DividendEvent).filter(
+        models.DividendEvent.id == div_id,
+        models.DividendEvent.portfolio_id.in_(pids),
+    ).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Evento non trovato")
+    if ev.type != models.DividendType.CERT_COUPON:
+        raise HTTPException(
+            status_code=400,
+            detail="La compensazione minusvalenze si applica solo alle cedole di certificati",
+        )
+
+    gross = ev.gross_amount if ev.gross_amount is not None else ev.amount
+    if payload.minus_compensation:
+        ev.amount = round(gross, 4)
+        ev.foreign_tax_amount = 0.0
+        ev.tax_amount = 0.0
+    else:
+        bd = compute_net(gross, ev.type, ev.instrument.asset_class, ev.instrument.country)
+        ev.amount = round(bd.net, 4)
+        ev.foreign_tax_amount = round(bd.foreign_tax, 4)
+        ev.tax_amount = round(bd.italian_tax, 4)
+    ev.minus_compensation = payload.minus_compensation
+    db.commit()
+    db.refresh(ev)
+    return ev
+
+
 @router.delete("/{div_id}", status_code=204)
 def delete_dividend(
     div_id: int,

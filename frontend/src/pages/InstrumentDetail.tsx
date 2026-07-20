@@ -314,7 +314,7 @@ export default function InstrumentDetail() {
           </div>
           <button
             onClick={() => setShowSettings(true)}
-            title="Impostazioni strumento (fonte prezzo)"
+            title="Modifica nome, classe, valuta e fonte prezzo dello strumento"
             className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-gray-600/40 rounded-lg px-2.5 py-1.5 transition-colors flex-shrink-0"
           >
             <Settings size={13} /> Impostazioni

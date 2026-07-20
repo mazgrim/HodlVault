@@ -229,6 +229,7 @@ function ConfirmCouponModal({ coupon, currency, quantity, onClose, onSaved }: {
   const suggested = quantity != null ? quantity * coupon.amount_per_unit : null
   const [gross, setGross] = useState(suggested != null ? String(Math.round(suggested * 100) / 100) : '')
   const [payDate, setPayDate] = useState(coupon.payment_date)
+  const [minusComp, setMinusComp] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
 
@@ -240,6 +241,7 @@ function ConfirmCouponModal({ coupon, currency, quantity, onClose, onSaved }: {
         portfolio_id: Number(portfolioId),
         gross_amount: parseFloat(gross),
         date: payDate,
+        minus_compensation: minusComp,
       })
       onSaved()
     } catch (err: any) {
@@ -286,8 +288,20 @@ function ConfirmCouponModal({ coupon, currency, quantity, onClose, onSaved }: {
           <p className="text-[11px] text-gray-500 -mt-2">
             {suggested != null && <>Suggerito: {fmtNum(suggested)} {currency} ({fmtNum(quantity!, 0)} unità × {fmtNum(coupon.amount_per_unit, 4)}). </>}
             Se questa cedola recupera cedole in memoria, indica il lordo effettivo incassato.
-            La tassazione (26%) viene stimata automaticamente.
+            {!minusComp && ' La tassazione (26%) viene stimata automaticamente.'}
           </p>
+
+          <label className="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+            <input type="checkbox" className="mt-0.5 accent-gold-500" checked={minusComp}
+              onChange={e => setMinusComp(e.target.checked)} />
+            <span>
+              Compensazione minusvalenza
+              <span className="block text-[11px] text-gray-500">
+                L'imposta è assorbita dallo zainetto fiscale: nessuna tassa, netto = lordo.
+                Modificabile anche dopo, dalla pagina Dividendi.
+              </span>
+            </span>
+          </label>
 
           {error && (
             <p className="text-red-400 text-sm bg-red-900/20 border border-red-700/30 rounded-lg px-3 py-2">{error}</p>

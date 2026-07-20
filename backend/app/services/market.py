@@ -15,7 +15,11 @@ from typing import Optional, List
 import httpx
 from sqlalchemy.orm import Session
 
-from ..models import Instrument, PriceHistory, FxRate, AssetClass, EtfProfile, EtfHolding, EtfSectorWeight, SecurityProfile
+from ..models import (
+    Instrument, PriceHistory, FxRate, AssetClass, PriceSource,
+    EtfProfile, EtfHolding, EtfSectorWeight, SecurityProfile,
+)
+from .custom_price import CustomPriceError, fetch_custom_price
 
 logger = logging.getLogger(__name__)
 
@@ -335,6 +339,8 @@ class MarketService:
             logger.info(f"Enrichment complete: {enriched} instruments updated.")
 
     def _is_enriched(self, inst: Instrument) -> bool:
+        if inst.price_source != PriceSource.YAHOO:
+            return True  # non quotato su Yahoo: nessun arricchimento possibile
         ac = inst.asset_class
         if ac == AssetClass.ETF:
             return self.db.query(EtfProfile).filter(EtfProfile.instrument_id == inst.id).first() is not None
@@ -516,10 +522,19 @@ class MarketService:
     # ── Price refresh ─────────────────────────────────────────────────────────
 
     async def refresh_all_prices(self):
-        """Refresh latest prices for all instruments and FX rates."""
+        """Refresh latest prices for all instruments and FX rates.
+
+        Gli strumenti sono partizionati per fonte: YAHOO via chart API (come
+        sempre), CUSTOM_JSON via l'endpoint configurato, MANUAL mai toccati.
+        Un fetch custom fallito registra l'errore sullo strumento e mantiene
+        l'ultimo prezzo noto, senza interrompere il refresh degli altri.
+        """
         instruments = self.db.query(Instrument).all()
         if not instruments:
             return
+
+        yahoo_insts = [i for i in instruments if i.price_source == PriceSource.YAHOO]
+        custom_insts = [i for i in instruments if i.price_source == PriceSource.CUSTOM_JSON]
 
         # Refresh FX rates first (latest), then ensure full history for conversion
         await self._refresh_fx_rates()
@@ -527,33 +542,72 @@ class MarketService:
         # Enrich sector/country/look-through for any instrument still missing it
         await self.enrich_all(only_missing=True)
 
-        # Fetch prices in parallel
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            tasks = [
-                _fetch_chart(inst.ticker, range_="5d", client=client)
-                for inst in instruments
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
+        # Fetch Yahoo prices in parallel
         updated = 0
-        for inst, result in zip(instruments, results):
-            if isinstance(result, Exception) or result is None:
-                logger.warning(f"Price fetch failed for {inst.ticker!r}: {result}")
-                continue
-            prices = _extract_prices(result)
-            if not prices:
-                continue
-            price_date, close = prices[-1]
-            self._upsert_price(inst.id, price_date, close, inst.currency)
-            updated += 1
+        if yahoo_insts:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                tasks = [
+                    _fetch_chart(inst.ticker, range_="5d", client=client)
+                    for inst in yahoo_insts
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for inst, result in zip(yahoo_insts, results):
+                if isinstance(result, Exception) or result is None:
+                    logger.warning(f"Price fetch failed for {inst.ticker!r}: {result}")
+                    continue
+                prices = _extract_prices(result)
+                if not prices:
+                    continue
+                price_date, close = prices[-1]
+                self._upsert_price(inst.id, price_date, close, inst.currency)
+                updated += 1
+
+        # Fetch custom JSON sources (sequenziale: endpoint eterogenei, pochi strumenti)
+        for inst in custom_insts:
+            if await self.refresh_custom_price(inst):
+                updated += 1
 
         self.db.commit()
-        logger.info(f"Prices updated for {updated}/{len(instruments)} instruments.")
+        logger.info(
+            f"Prices updated for {updated}/{len(yahoo_insts) + len(custom_insts)} "
+            f"instruments ({len(instruments) - len(yahoo_insts) - len(custom_insts)} manual, skipped)."
+        )
+
+    async def refresh_custom_price(self, inst: Instrument) -> bool:
+        """Fetch del prezzo per un singolo strumento CUSTOM_JSON. Aggiorna
+        price_fetch_error (None = ok) e ritorna True se il prezzo è stato
+        salvato. Non committa: il chiamante decide quando."""
+        try:
+            price, quote_date, _ = await fetch_custom_price(
+                inst.custom_url or "",
+                inst.custom_jsonpath_price or "",
+                inst.custom_jsonpath_date,
+                isin=inst.isin,
+                ticker=inst.ticker,
+            )
+        except CustomPriceError as exc:
+            inst.price_fetch_error = str(exc)
+            inst.price_fetch_error_at = datetime.utcnow()
+            logger.warning(f"Custom price fetch failed for {inst.ticker!r}: {exc}")
+            return False
+        except Exception as exc:  # difensivo: mai far saltare il refresh degli altri
+            inst.price_fetch_error = f"Errore inatteso: {exc}"
+            inst.price_fetch_error_at = datetime.utcnow()
+            logger.warning(f"Custom price fetch failed for {inst.ticker!r}: {exc}")
+            return False
+        self._upsert_price(inst.id, quote_date, price, inst.currency)
+        inst.price_fetch_error = None
+        inst.price_fetch_error_at = None
+        return True
 
     async def fetch_historical_prices(self, instrument_id: int, period: str = "5y"):
         """Fetch full price history for a single instrument."""
         inst = self.db.query(Instrument).filter(Instrument.id == instrument_id).first()
         if not inst:
+            return
+        if inst.price_source != PriceSource.YAHOO:
+            logger.info(f"Historical fetch skipped for {inst.ticker!r}: fonte {inst.price_source.value}")
             return
 
         # Map internal period strings to Yahoo Finance range strings
@@ -617,9 +671,12 @@ class MarketService:
         """
         from datetime import timedelta
 
+        inst = self.db.query(Instrument).filter(Instrument.id == instrument_id).first()
+        yahoo_backed = inst is not None and inst.price_source == PriceSource.YAHOO
+
         # 1G → intraday (5-min) line for the current session, with timestamps.
         # Falls through to the daily path if intraday data isn't available.
-        if period == "1G":
+        if period == "1G" and yahoo_backed:
             intraday = await self._intraday_chart(instrument_id)
             if intraday:
                 return intraday
@@ -654,11 +711,11 @@ class MarketService:
         if rows and rows[0].date <= cutoff + timedelta(days=30):
             return [{"date": r.date.isoformat(), "price": r.close_price} for r in rows]
 
-        # Insufficient coverage → fetch full history from Yahoo, persist, re-read
-        inst = self.db.query(Instrument).filter(Instrument.id == instrument_id).first()
-        if not inst:
-            # Return whatever partial data we have
+        # Fonti manuali/custom: lo storico è SOLO quello in DB, niente Yahoo.
+        if not inst or not yahoo_backed:
             return [{"date": r.date.isoformat(), "price": r.close_price} for r in rows]
+
+        # Insufficient coverage → fetch full history from Yahoo, persist, re-read
 
         logger.info(f"Fetching historical prices for {inst.ticker!r} (period={period})")
         result = await _fetch_chart(inst.ticker, range_=yf_range)

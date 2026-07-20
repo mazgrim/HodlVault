@@ -24,6 +24,12 @@ from ..models import DividendType, AssetClass
 
 # ── Aliquote italiane (imposta sostitutiva) ───────────────────────────────────
 def _italian_rate(div_type: DividendType, asset_class: Optional[AssetClass]) -> float:
+    # Cedole di certificati: 26% a prescindere dall'asset class (quelle
+    # condizionate sono redditi diversi, quelle garantite redditi di capitale,
+    # ma l'aliquota è comunque il 26% — il sottotipo CERT_COUPON resta
+    # tracciato per future distinzioni, es. compensazione minusvalenze).
+    if div_type == DividendType.CERT_COUPON:
+        return float(os.getenv("TAX_RATE_CERTIFICATE", os.getenv("TAX_RATE_DIVIDEND", "0.26")))
     is_bond = div_type == DividendType.COUPON or asset_class == AssetClass.BOND
     if is_bond:
         return float(os.getenv("TAX_RATE_COUPON", "0.125"))
@@ -120,7 +126,9 @@ def compute_net(
             italian_rate=round(eff_rate, 5),
         )
 
-    f_rate = foreign_rate(country)
+    # Le cedole dei certificati non subiscono ritenuta alla fonte estera
+    # (l'emittente paga il lordo, tassato solo in Italia).
+    f_rate = 0.0 if div_type == DividendType.CERT_COUPON else foreign_rate(country)
     base = max(0.0, gross - max(0.0, accrued_interest))
     foreign_tax = gross * f_rate
     italian_tax = max(0.0, base - foreign_tax) * i_rate

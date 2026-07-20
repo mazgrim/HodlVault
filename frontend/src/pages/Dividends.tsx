@@ -5,19 +5,25 @@ import PortfolioSelector from '../components/PortfolioSelector'
 import KpiCard from '../components/KpiCard'
 import { PageSpinner } from '../components/Spinner'
 import { usePortfolios } from '../context/PortfoliosContext'
-import { divApi } from '../api'
-import { fmtEur, fmtPct, fmtDate, fmtMonth } from '../utils/format'
+import { divApi, couponApi } from '../api'
+import { fmtEur, fmtPct, fmtDate, fmtMonth, fmtNum } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
-import { Landmark, TrendingUp, Calendar, Search, X, Trash2, RefreshCw, Receipt } from 'lucide-react'
+import { Landmark, TrendingUp, Calendar, Search, X, Trash2, RefreshCw, Receipt, CalendarClock, Scale } from 'lucide-react'
 
 interface DividendEvent {
   id: number; instrument_id: number; date: string; amount: number; currency: string; fx_rate: number
   gross_amount: number | null; foreign_tax_amount: number; tax_amount: number; accrued_interest: number
-  foreign_tax_rate: number; italian_tax_rate: number
+  foreign_tax_rate: number; italian_tax_rate: number; minus_compensation: boolean
   type: string; instrument: { ticker: string; name: string; isin: string | null }
 }
-interface MonthlyDiv { month: string; amount: number }
+interface MonthlyDiv { month: string; amount: number; dividends: number; coupons: number }
 interface DivProjection { month: string; amount: number }
+interface UpcomingCoupon {
+  id: number; instrument_id: number; ticker: string; name: string; currency: string
+  payment_date: string; observation_date: string | null
+  amount_per_unit: number; coupon_type: 'GUARANTEED' | 'CONDITIONAL'; memory_effect: boolean
+  quantity: number; estimated_total: number; estimated_total_eur: number
+}
 interface KPIs { total_ytd: number; total_all_time: number; total_gross: number; total_tax: number; avg_yield_on_cost: number }
 
 export default function Dividends() {
@@ -27,6 +33,8 @@ export default function Dividends() {
   const [events, setEvents] = useState<DividendEvent[]>([])
   const [monthly, setMonthly] = useState<MonthlyDiv[]>([])
   const [projection, setProjection] = useState<DivProjection[]>([])
+  const [upcoming, setUpcoming] = useState<UpcomingCoupon[]>([])
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false)
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<number | null>(null)
@@ -48,16 +56,18 @@ export default function Dividends() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [evRes, kRes, mRes, pRes] = await Promise.all([
+      const [evRes, kRes, mRes, pRes, upRes] = await Promise.all([
         divApi.list(selectedPf ?? undefined),
         divApi.kpis(selectedPf ?? undefined),
         divApi.monthly(selectedPf ?? undefined),
         divApi.projection(selectedPf ?? undefined),
+        couponApi.upcoming(selectedPf ?? undefined),
       ])
       setEvents(evRes.data)
       setKpis(kRes.data)
       setMonthly(mRes.data)
       setProjection(pRes.data)
+      setUpcoming(upRes.data)
       setSelectedIds(new Set())
     } finally {
       setLoading(false)
@@ -147,6 +157,24 @@ export default function Dividends() {
     }
   }
 
+  const [togglingId, setTogglingId] = useState<number | null>(null)
+  const handleToggleMinus = async (ev: DividendEvent) => {
+    setTogglingId(ev.id)
+    try {
+      const res = await divApi.toggleMinus(ev.id, !ev.minus_compensation)
+      setEvents(prev => prev.map(e => (e.id === ev.id ? { ...e, ...res.data } : e)))
+      // Tasse e netto sono cambiati: aggiorna KPI e grafico senza spinner globale
+      const [kRes, mRes] = await Promise.all([
+        divApi.kpis(selectedPf ?? undefined),
+        divApi.monthly(selectedPf ?? undefined),
+      ])
+      setKpis(kRes.data)
+      setMonthly(mRes.data)
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
   const handleSync = async () => {
     setSyncing(true)
     setSyncMsg(null)
@@ -169,7 +197,7 @@ export default function Dividends() {
 
   if (pfLoading) return <PageSpinner />
 
-  const barData  = monthly.map(m => ({ month: fmtMonth(m.month), importo: m.amount }))
+  const barData  = monthly.map(m => ({ month: fmtMonth(m.month), Dividendi: m.dividends, Cedole: m.coupons }))
   const projData = projection.map(p => ({ month: fmtMonth(p.month), importo: p.amount }))
 
   return (
@@ -205,7 +233,7 @@ export default function Dividends() {
 
           {/* Monthly bar chart */}
           <div className="card">
-            <h2 className="text-base font-semibold text-gray-200 mb-4">Dividendi Ultimi 12 Mesi</h2>
+            <h2 className="text-base font-semibold text-gray-200 mb-4">Dividendi/Cedole Ultimi 12 Mesi</h2>
             {barData.length === 0 ? (
               <div className="h-48 flex items-center justify-center text-gray-500 text-sm">
                 Nessun dividendo registrato
@@ -217,11 +245,13 @@ export default function Dividends() {
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tickFormatter={v => `€${v}`} tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={(v: number) => [fmtEur(v), 'Importo']}
+                    formatter={(v: number, name: string) => [fmtEur(v), name]}
                     contentStyle={tooltip()}
                     cursor={barCursor}
                   />
-                  <Bar dataKey="importo" fill="#D4A017" radius={[4, 4, 0, 0]} />
+                  {/* Barre impilate: l'altezza è la somma, il tooltip tiene le voci separate */}
+                  <Bar dataKey="Dividendi" stackId="dc" fill="#D4A017" />
+                  <Bar dataKey="Cedole" stackId="dc" fill={neutralSeries} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -246,6 +276,80 @@ export default function Dividends() {
               </ResponsiveContainer>
             </div>
           )}
+
+          {/* ── Prossime Cedole (piano cedolare certificati) ───────────────── */}
+          {upcoming.length > 0 && (() => {
+            const today = new Date().toISOString().slice(0, 10)
+            const visible = showAllUpcoming ? upcoming : upcoming.slice(0, 6)
+            return (
+              <div className="card space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-semibold text-gray-200 flex items-center gap-2">
+                    <CalendarClock size={16} className="text-gold-500" />
+                    Prossime Cedole
+                    <span className="text-xs text-gray-500 font-normal">({upcoming.length})</span>
+                  </h2>
+                  <span className="text-xs text-gray-500">
+                    Stime dal piano cedolare — si confermano dalla pagina dello strumento
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-700/50">
+                        {['Pagamento', 'Strumento', 'Osservazione', 'Tipo', 'Importo/unità', 'Quantità', 'Stima lordo'].map(h => (
+                          <th key={h} className="text-left py-2 pr-4 text-xs font-medium text-gray-400 uppercase whitespace-nowrap last:pr-0">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visible.map(c => {
+                        const due = c.payment_date <= today
+                        return (
+                          <tr key={c.id} className={`table-row-hover border-b border-gray-700/20 last:border-0 ${due ? 'bg-gold-500/5' : ''}`}>
+                            <td className="py-2.5 pr-4 whitespace-nowrap text-gray-300">
+                              {fmtDate(c.payment_date)}
+                              {due && <span className="ml-2 text-[10px] font-semibold text-gold-500 uppercase">in scadenza</span>}
+                            </td>
+                            <td className="py-2.5 pr-4">
+                              <Link to={`/instruments/${c.instrument_id}`} className="group">
+                                <span className="font-medium text-gray-100 group-hover:text-gold-400 transition-colors">{c.ticker}</span>
+                                <span className="text-xs text-gray-500 ml-2 hidden md:inline truncate max-w-[220px] align-middle inline-block">{c.name}</span>
+                              </Link>
+                            </td>
+                            <td className="py-2.5 pr-4 whitespace-nowrap text-gray-500">
+                              {c.observation_date ? fmtDate(c.observation_date) : '—'}
+                            </td>
+                            <td className="py-2.5 pr-4 whitespace-nowrap">
+                              {c.coupon_type === 'GUARANTEED'
+                                ? <span className="inline-block text-xs font-medium text-emerald-300 bg-emerald-900/40 border border-emerald-700/30 rounded-full px-2 py-0.5">Garantita</span>
+                                : <span className="inline-block text-xs font-medium text-amber-300 bg-amber-900/40 border border-amber-700/30 rounded-full px-2 py-0.5">Condizionata</span>}
+                              {c.memory_effect && <span className="ml-1.5 text-[10px] text-gray-500" title="Effetto memoria">MEM</span>}
+                            </td>
+                            <td className="py-2.5 pr-4 tabular-nums text-gray-300">
+                              {fmtNum(c.amount_per_unit, 4)} {c.currency}
+                            </td>
+                            <td className="py-2.5 pr-4 tabular-nums text-gray-400">{fmtNum(c.quantity, 0)}</td>
+                            <td className="py-2.5 tabular-nums text-gray-200 font-medium">{fmtEur(c.estimated_total_eur)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {upcoming.length > 6 && (
+                  <button
+                    onClick={() => setShowAllUpcoming(v => !v)}
+                    className="text-xs text-gold-500 hover:text-gold-400 transition-colors"
+                  >
+                    {showAllUpcoming ? 'Mostra solo le prossime 6' : `Mostra tutte (${upcoming.length})`}
+                  </button>
+                )}
+              </div>
+            )
+          })()}
 
           {/* ── Storico Incassi ────────────────────────────────────────────── */}
           <div className="card space-y-4">
@@ -294,7 +398,7 @@ export default function Dividends() {
                             : 'bg-navy-700 text-gray-400 border-gray-600/30 hover:text-gray-200'
                         }`}
                       >
-                        {t === 'ALL' ? 'Tutti' : t}
+                        {t === 'ALL' ? 'Tutti' : t === 'CERT_COUPON' ? 'CEDOLA CERT.' : t}
                       </button>
                     ))}
                   </div>
@@ -415,7 +519,7 @@ export default function Dividends() {
                           </td>
                           <td className="py-2.5 pr-4">
                             <span className={ev.type === 'DIVIDEND' ? 'badge-green' : 'badge-gold'}>
-                              {ev.type}
+                              {ev.type === 'CERT_COUPON' ? 'CEDOLA CERT.' : ev.type}
                             </span>
                           </td>
                           {(() => {
@@ -425,7 +529,9 @@ export default function Dividends() {
                             const netEur = ev.amount / fx
                             const fRate = Math.round((ev.foreign_tax_rate || 0) * 1000) / 10
                             const iRate = Math.round((ev.italian_tax_rate || 0) * 1000) / 10
-                            const rateLabel = fRate > 0 ? `Est. ${fRate}% + IT ${iRate}%` : (iRate > 0 ? `IT ${iRate}%` : '—')
+                            const rateLabel = ev.minus_compensation
+                              ? 'Comp. minus'
+                              : fRate > 0 ? `Est. ${fRate}% + IT ${iRate}%` : (iRate > 0 ? `IT ${iRate}%` : '—')
                             return (
                               <>
                                 <td className="py-2.5 pr-4 tabular-nums text-gray-300">{fmtEur(grossEur)}</td>
@@ -441,7 +547,23 @@ export default function Dividends() {
                               </>
                             )
                           })()}
-                          <td className="py-2.5">
+                          <td className="py-2.5 whitespace-nowrap">
+                            {ev.type === 'CERT_COUPON' && (
+                              <button
+                                onClick={() => handleToggleMinus(ev)}
+                                disabled={togglingId === ev.id}
+                                className={`mr-2 transition-colors disabled:opacity-40 ${
+                                  ev.minus_compensation
+                                    ? 'text-gold-500 hover:text-gold-400'
+                                    : 'text-gray-600 hover:text-gray-300'
+                                }`}
+                                title={ev.minus_compensation
+                                  ? 'Compensazione minusvalenza attiva: nessuna tassa, netto = lordo. Clicca per disattivare (ricalcola la stima al 26%).'
+                                  : 'Attiva compensazione minusvalenza: azzera le tasse, netto = lordo.'}
+                              >
+                                <Scale size={14} />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDelete(ev.id)}
                               disabled={deletingId === ev.id}

@@ -16,7 +16,25 @@ class TransactionType(str, enum.Enum):
 
 class DividendType(str, enum.Enum):
     DIVIDEND = "DIVIDEND"
-    COUPON = "COUPON"
+    COUPON = "COUPON"            # cedola bond / titolo di Stato (12,5% se white-list)
+    CERT_COUPON = "CERT_COUPON"  # cedola certificato (26%; se condizionata è reddito diverso)
+
+
+class PriceSource(str, enum.Enum):
+    YAHOO = "YAHOO"              # chart API Yahoo Finance (default, comportamento storico)
+    MANUAL = "MANUAL"            # prezzo inserito a mano dall'utente
+    CUSTOM_JSON = "CUSTOM_JSON"  # fetch da endpoint JSON configurato sullo strumento
+
+
+class CouponType(str, enum.Enum):
+    GUARANTEED = "GUARANTEED"    # garantita
+    CONDITIONAL = "CONDITIONAL"  # condizionata (barriera)
+
+
+class CouponStatus(str, enum.Enum):
+    PLANNED = "PLANNED"   # prevista — mai conteggiata nelle performance
+    PAID = "PAID"         # confermata: ha generato un DividendEvent
+    SKIPPED = "SKIPPED"   # saltata (barriera violata): nessun evento generato
 
 
 class AssetClass(str, enum.Enum):
@@ -72,9 +90,24 @@ class Instrument(Base):
     sector = Column(String(128), nullable=True)
     country = Column(String(64), nullable=True)
 
+    # Fonte prezzo (YAHOO = comportamento storico). Per CUSTOM_JSON i campi
+    # custom_* configurano l'endpoint; {ISIN} e {TICKER} nella URL sono
+    # sostituiti a runtime. price_fetch_error tiene l'ultimo errore di fetch
+    # (None = ultimo fetch ok) senza toccare i prezzi già salvati.
+    price_source = Column(Enum(PriceSource), default=PriceSource.YAHOO, nullable=False)
+    custom_url = Column(Text, nullable=True)
+    custom_jsonpath_price = Column(String(256), nullable=True)
+    custom_jsonpath_date = Column(String(256), nullable=True)
+    price_fetch_error = Column(Text, nullable=True)
+    price_fetch_error_at = Column(DateTime, nullable=True)
+
     price_history = relationship("PriceHistory", back_populates="instrument", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="instrument")
     dividend_events = relationship("DividendEvent", back_populates="instrument")
+    coupon_schedule = relationship(
+        "CouponSchedule", back_populates="instrument",
+        cascade="all, delete-orphan", order_by="CouponSchedule.payment_date",
+    )
 
 
 class Transaction(Base):
@@ -115,6 +148,9 @@ class DividendEvent(Base):
     currency = Column(String(8), default="EUR")
     fx_rate = Column(Float, default=1.0)
     type = Column(Enum(DividendType), default=DividendType.DIVIDEND)
+    # Compensazione minusvalenze (solo cedole certificati): l'imposta è assorbita
+    # dallo zainetto fiscale, quindi netto = lordo e tasse a zero.
+    minus_compensation = Column(Boolean, default=False, nullable=False)
 
     portfolio = relationship("Portfolio", back_populates="dividend_events")
     instrument = relationship("Instrument", back_populates="dividend_events")
@@ -124,6 +160,34 @@ class DividendEvent(Base):
     __table_args__ = (
         UniqueConstraint("portfolio_id", "instrument_id", "date", "type", name="uq_dividend_event"),
     )
+
+
+class CouponSchedule(Base):
+    """Piano cedolare di un certificato/bond strutturato. Come PriceHistory è un
+    dato dello STRUMENTO (condiviso), non del portafoglio: alla conferma di una
+    cedola come pagata viene creato un DividendEvent (portafoglio-specifico, tipo
+    CERT_COUPON) che segue il flusso dei dividendi esistente. Le righe PLANNED
+    non entrano MAI nei calcoli di performance.
+
+    `amount_per_unit` è l'importo cedola PER UNITÀ nella valuta dello strumento
+    (es. 2.50 EUR per certificato) — coerente con i dividendi Yahoo per-share:
+    il totale incassato = amount_per_unit × quantità detenuta."""
+    __tablename__ = "coupon_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
+    observation_date = Column(Date, nullable=True)          # data osservazione barriera (opzionale)
+    payment_date = Column(Date, nullable=False, index=True)
+    amount_per_unit = Column(Float, nullable=False)         # per unità, valuta strumento
+    coupon_type = Column(Enum(CouponType), default=CouponType.CONDITIONAL, nullable=False)
+    memory_effect = Column(Boolean, default=False)          # recupera cedole saltate precedenti
+    status = Column(Enum(CouponStatus), default=CouponStatus.PLANNED, nullable=False)
+    # Evento creato alla conferma (per tracciabilità e per resettare lo stato se
+    # l'evento viene cancellato). Nessun cascade: l'evento è un incasso reale.
+    dividend_event_id = Column(Integer, ForeignKey("dividend_events.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    instrument = relationship("Instrument", back_populates="coupon_schedule")
 
 
 class PriceHistory(Base):

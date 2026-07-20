@@ -4,10 +4,12 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, ReferenceDot,
 } from 'recharts'
-import { ArrowLeft, TrendingUp, Wallet, BarChart2 } from 'lucide-react'
+import { ArrowLeft, TrendingUp, Wallet, BarChart2, Settings, AlertTriangle, RefreshCw, Plus, Loader2 } from 'lucide-react'
 import KpiCard from '../components/KpiCard'
 import ChangeBadge from '../components/ChangeBadge'
 import { PageSpinner } from '../components/Spinner'
+import InstrumentSettingsModal from '../components/InstrumentSettingsModal'
+import CouponScheduleSection from '../components/CouponScheduleSection'
 import { marketApi } from '../api'
 import { fmtEur, fmtPct, fmtNum, fmtDate, fmtDateTime, fmtTime, pnlClass, pnlSign } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
@@ -28,6 +30,13 @@ interface InstrumentInfo {
   currency: string
   sector: string | null
   country: string | null
+  price_source: string
+  custom_url: string | null
+  custom_jsonpath_price: string | null
+  custom_jsonpath_date: string | null
+  price_fetch_error: string | null
+  price_fetch_error_at: string | null
+  last_price_date: string | null
 }
 
 interface PositionKPI {
@@ -85,6 +94,24 @@ function assetBadge(ac: string) {
   return <span className={cls}>{ac.replace('_', ' ')}</span>
 }
 
+const SOURCE_LABEL: Record<string, string> = {
+  YAHOO: 'Yahoo Finance',
+  MANUAL: 'Prezzo manuale',
+  CUSTOM_JSON: 'Endpoint JSON',
+}
+
+const DIV_TYPE_LABEL: Record<string, string> = {
+  DIVIDEND: 'DIVIDENDO',
+  COUPON: 'CEDOLA',
+  CERT_COUPON: 'CEDOLA CERT.',
+}
+
+/** Giorni interi trascorsi da una data ISO (0 = oggi). */
+function daysSince(iso: string): number {
+  const then = new Date(iso + 'T00:00:00').getTime()
+  return Math.floor((Date.now() - then) / 86_400_000)
+}
+
 /** Find the nearest date in priceMap to `buyDate` (within ±5 calendar days). */
 function nearestDate(buyDate: string, priceMap: Record<string, number>): string | null {
   if (priceMap[buyDate] != null) return buyDate
@@ -129,6 +156,14 @@ export default function InstrumentDetail() {
   const [loading, setLoading]       = useState(true)
   const [chartLoading, setChartLoading] = useState(false)
 
+  // ── Fonte prezzo: impostazioni, inserimento manuale, refresh custom ────────
+  const [showSettings, setShowSettings] = useState(false)
+  const [showPriceForm, setShowPriceForm] = useState(false)
+  const [manualDate, setManualDate]   = useState(new Date().toISOString().slice(0, 10))
+  const [manualPrice, setManualPrice] = useState('')
+  const [savingPrice, setSavingPrice] = useState(false)
+  const [refreshingPrice, setRefreshingPrice] = useState(false)
+
   // ── Load detail ────────────────────────────────────────────────────────────
   const loadDetail = useCallback(async () => {
     if (!instId) return
@@ -159,6 +194,35 @@ export default function InstrumentDetail() {
 
   useEffect(() => { loadDetail() }, [loadDetail])
   useEffect(() => { loadChart() }, [loadChart])
+
+  // ── Fonte prezzo handlers ──────────────────────────────────────────────────
+  const reloadAll = useCallback(async () => {
+    await Promise.all([loadDetail(), loadChart()])
+  }, [loadDetail, loadChart])
+
+  const handleAddManualPrice = async () => {
+    const p = parseFloat(manualPrice)
+    if (!p || p <= 0) return
+    setSavingPrice(true)
+    try {
+      await marketApi.addManualPrice(instId, { date: manualDate, price: p })
+      setManualPrice('')
+      setShowPriceForm(false)
+      await reloadAll()
+    } finally {
+      setSavingPrice(false)
+    }
+  }
+
+  const handleRefreshCustom = async () => {
+    setRefreshingPrice(true)
+    try {
+      await marketApi.refreshInstrumentPrice(instId)
+      await reloadAll()
+    } finally {
+      setRefreshingPrice(false)
+    }
+  }
 
   // ── Price lookup map ───────────────────────────────────────────────────────
   const priceMap = useMemo(() => {
@@ -229,6 +293,11 @@ export default function InstrumentDetail() {
               <span className="text-xs text-gray-400 bg-navy-700/70 border border-gray-600/40 rounded px-2 py-0.5">
                 {instrument.currency}
               </span>
+              {instrument.price_source !== 'YAHOO' && (
+                <span className="text-xs text-sky-300 bg-sky-900/40 border border-sky-700/30 rounded px-2 py-0.5">
+                  {SOURCE_LABEL[instrument.price_source] ?? instrument.price_source}
+                </span>
+              )}
             </div>
             <p className="text-gray-300 text-sm">{instrument.name}</p>
             <div className="flex flex-wrap gap-4 mt-2 text-xs text-gray-500">
@@ -243,8 +312,95 @@ export default function InstrumentDetail() {
               )}
             </div>
           </div>
+          <button
+            onClick={() => setShowSettings(true)}
+            title="Modifica nome, classe, valuta e fonte prezzo dello strumento"
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-gray-600/40 rounded-lg px-2.5 py-1.5 transition-colors flex-shrink-0"
+          >
+            <Settings size={13} /> Impostazioni
+          </button>
         </div>
       </div>
+
+      {/* ── Fonte prezzo: stato / avvisi / azioni ─────────────────────────── */}
+      {instrument.price_source === 'MANUAL' && (() => {
+        const stale = instrument.last_price_date != null && daysSince(instrument.last_price_date) > 7
+        return (
+          <div className={`rounded-xl border px-4 py-3 text-sm ${
+            stale ? 'bg-amber-900/20 border-amber-700/40' : 'bg-navy-800 border-gray-700/50'
+          }`}>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                {stale && <AlertTriangle size={15} className="text-amber-400 flex-shrink-0" />}
+                <span className={stale ? 'text-amber-300' : 'text-gray-400'}>
+                  {instrument.last_price_date
+                    ? <>Ultimo aggiornamento manuale: <span className="font-medium">{fmtDate(instrument.last_price_date)}</span>
+                        {stale && <> — più vecchio di 7 giorni ({daysSince(instrument.last_price_date)} gg)</>}</>
+                    : 'Nessun prezzo inserito: aggiungi la prima quotazione.'}
+                </span>
+              </div>
+              <button onClick={() => setShowPriceForm(v => !v)}
+                className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5">
+                <Plus size={13} /> Aggiorna prezzo
+              </button>
+            </div>
+            {showPriceForm && (
+              <div className="flex items-end gap-3 mt-3 flex-wrap">
+                <div>
+                  <label className="label">Data</label>
+                  <input className="input" type="date" value={manualDate}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setManualDate(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">Prezzo ({instrument.currency})</label>
+                  <input className="input tabular-nums" type="number" min="0" step="any" placeholder="0.00"
+                    value={manualPrice} onChange={e => setManualPrice(e.target.value)} />
+                </div>
+                <button onClick={handleAddManualPrice}
+                  disabled={savingPrice || !manualPrice}
+                  className="btn-primary text-sm py-2 px-4">
+                  {savingPrice ? <Loader2 size={14} className="animate-spin" /> : 'Salva'}
+                </button>
+                <p className="text-[11px] text-gray-500 w-full -mt-1">
+                  Con una data passata aggiungi una quotazione storica; con la data di oggi aggiorni il prezzo corrente.
+                </p>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {instrument.price_source === 'CUSTOM_JSON' && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${
+          instrument.price_fetch_error ? 'bg-red-900/20 border-red-700/40' : 'bg-navy-800 border-gray-700/50'
+        }`}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2 min-w-0">
+              {instrument.price_fetch_error ? (
+                <>
+                  <AlertTriangle size={15} className="text-red-400 flex-shrink-0" />
+                  <span className="text-red-300">
+                    Ultimo fetch fallito{instrument.price_fetch_error_at ? ` (${fmtDateTime(instrument.price_fetch_error_at)})` : ''}:{' '}
+                    <span className="text-red-400/90">{instrument.price_fetch_error}</span>
+                    {instrument.last_price_date && (
+                      <span className="text-gray-400"> — mantenuto l'ultimo prezzo del {fmtDate(instrument.last_price_date)}</span>
+                    )}
+                  </span>
+                </>
+              ) : (
+                <span className="text-gray-400">
+                  Fonte JSON custom{instrument.last_price_date && <> — ultimo prezzo: <span className="font-medium text-gray-300">{fmtDate(instrument.last_price_date)}</span></>}
+                </span>
+              )}
+            </div>
+            <button onClick={handleRefreshCustom} disabled={refreshingPrice}
+              className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5">
+              <RefreshCw size={13} className={refreshingPrice ? 'animate-spin' : ''} /> Aggiorna ora
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Position KPIs ──────────────────────────────────────────────────── */}
       {position ? (
@@ -416,6 +572,14 @@ export default function InstrumentDetail() {
         )}
       </div>
 
+      {/* ── Piano Cedole (certificati) ────────────────────────────────────── */}
+      <CouponScheduleSection
+        instrumentId={instrument.id}
+        currency={instrument.currency}
+        quantity={position?.quantity ?? null}
+        onChanged={loadDetail}
+      />
+
       {/* ── Personal Transactions ─────────────────────────────────────────── */}
       <div className="card">
         <h2 className="text-base font-semibold text-gray-200 mb-4">
@@ -494,7 +658,7 @@ export default function InstrumentDetail() {
                     <td className="py-3 pr-4 text-gray-300 whitespace-nowrap">{fmtDate(div.date)}</td>
                     <td className="py-3 pr-4">
                       <span className={div.type === 'DIVIDEND' ? 'badge-green' : 'badge-gold'}>
-                        {div.type}
+                        {DIV_TYPE_LABEL[div.type] ?? div.type}
                       </span>
                     </td>
                     <td className="py-3 tabular-nums text-emerald-400 font-medium">{fmtEur(div.amount)}</td>
@@ -504,6 +668,15 @@ export default function InstrumentDetail() {
             </table>
           </div>
         </div>
+      )}
+
+      {/* ── Settings modal ────────────────────────────────────────────────── */}
+      {showSettings && (
+        <InstrumentSettingsModal
+          instrument={instrument}
+          onClose={() => setShowSettings(false)}
+          onSaved={() => { setShowSettings(false); reloadAll() }}
+        />
       )}
     </div>
   )

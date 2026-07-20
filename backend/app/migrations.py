@@ -28,7 +28,7 @@ from sqlalchemy.engine import Engine
 logger = logging.getLogger(__name__)
 
 # Alza questo numero quando aggiungi una migrazione in MIGRATIONS.
-TARGET_VERSION = 1
+TARGET_VERSION = 3
 
 
 # ── Migrazioni ────────────────────────────────────────────────────────────────
@@ -52,9 +52,45 @@ def _migration_1_baseline(cur):
     cur.execute("UPDATE dividend_events SET gross_amount = amount WHERE gross_amount IS NULL")
 
 
+def _migration_2_price_sources(cur):
+    """
+    Fonti prezzo alternative a Yahoo (manuale / endpoint JSON custom) e piano
+    cedolare dei certificati. Aggiunge le colonne di configurazione su
+    `instruments`; tutti gli strumenti esistenti restano 'YAHOO'. La tabella
+    `coupon_schedules` è creata da Base.metadata.create_all (gira prima delle
+    migrazioni), quindi qui non serve alcun CREATE TABLE.
+    """
+    new_cols = {
+        "price_source": "VARCHAR(11) NOT NULL DEFAULT 'YAHOO'",
+        "custom_url": "TEXT",
+        "custom_jsonpath_price": "VARCHAR(256)",
+        "custom_jsonpath_date": "VARCHAR(256)",
+        "price_fetch_error": "TEXT",
+        "price_fetch_error_at": "DATETIME",
+    }
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(instruments)").fetchall()}
+    for col, ddl in new_cols.items():
+        if col not in existing:
+            cur.execute(f"ALTER TABLE instruments ADD COLUMN {col} {ddl}")
+    cur.execute("UPDATE instruments SET price_source = 'YAHOO' WHERE price_source IS NULL")
+
+
+def _migration_3_minus_compensation(cur):
+    """
+    Flag "compensazione minusvalenza" sugli incassi (cedole certificati): quando
+    attivo l'imposta è assorbita dallo zainetto fiscale e il netto coincide col
+    lordo. Gli eventi esistenti restano non compensati.
+    """
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(dividend_events)").fetchall()}
+    if "minus_compensation" not in existing:
+        cur.execute("ALTER TABLE dividend_events ADD COLUMN minus_compensation BOOLEAN NOT NULL DEFAULT 0")
+
+
 # Mappa versione → funzione. Le chiavi devono essere consecutive a partire da 1.
 MIGRATIONS = {
     1: _migration_1_baseline,
+    2: _migration_2_price_sources,
+    3: _migration_3_minus_compensation,
 }
 
 

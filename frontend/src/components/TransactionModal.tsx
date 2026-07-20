@@ -3,6 +3,7 @@ import { X, Loader2 } from 'lucide-react'
 import { marketApi, txApi, portfolioApi } from '../api'
 import { usePortfolios } from '../context/PortfoliosContext'
 import TickerSearchInput, { type TickerResult } from './TickerSearchInput'
+import PriceSourceConfig, { type PriceSourceValue } from './PriceSourceConfig'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,15 @@ export default function TransactionModal({ onClose, onSaved, initial }: Props) {
   const [resolving, setResolving]         = useState(false)
   const [resolveError, setResolveError]   = useState('')
 
+  // ── Strumento non su Yahoo (certificati SeDeX/Cert-X, non quotati…) ───────
+  const [manualMode, setManualMode]   = useState(false)
+  const [manIsin, setManIsin]         = useState('')
+  const [manName, setManName]         = useState('')
+  const [manClass, setManClass]       = useState('OTHER')
+  const [manSource, setManSource]     = useState<PriceSourceValue>({
+    price_source: 'MANUAL', custom_url: '', custom_jsonpath_price: '', custom_jsonpath_date: '',
+  })
+
   // ── Inline portfolio creation ─────────────────────────────────────────────
   const [showNewPf, setShowNewPf]     = useState(false)
   const [newPfName, setNewPfName]     = useState('')
@@ -159,18 +169,40 @@ export default function TransactionModal({ onClose, onSaved, initial }: Props) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!instrument || !portfolioId) return
+    if (!portfolioId) return
+    if (!manualMode && !instrument) return
+    if (manualMode && (!manIsin.trim() || !manName.trim())) return
+    if (manualMode && manSource.price_source === 'CUSTOM_JSON'
+        && (!manSource.custom_url || !manSource.custom_jsonpath_price)) {
+      setError('Per la fonte JSON servono URL e JSONPath del prezzo.')
+      return
+    }
     setSaving(true); setError('')
     try {
-      const instRes = await marketApi.createInstrument({
-        ticker:      instrument.ticker,
-        isin:        instrument.isin,
-        name:        instrument.name,
-        asset_class: instrument.asset_class,
-        currency:    instrument.currency,
-        sector:      instrument.sector,
-        country:     instrument.country,
-      })
+      const instPayload = manualMode
+        ? {
+            ticker:      manIsin.trim().toUpperCase(),   // identificato dall'ISIN
+            isin:        manIsin.trim().toUpperCase(),
+            name:        manName.trim(),
+            asset_class: manClass,
+            currency,
+            sector:      null,
+            country:     null,
+            price_source:          manSource.price_source,
+            custom_url:            manSource.custom_url.trim() || null,
+            custom_jsonpath_price: manSource.custom_jsonpath_price.trim() || null,
+            custom_jsonpath_date:  manSource.custom_jsonpath_date.trim() || null,
+          }
+        : {
+            ticker:      instrument!.ticker,
+            isin:        instrument!.isin,
+            name:        instrument!.name,
+            asset_class: instrument!.asset_class,
+            currency:    instrument!.currency,
+            sector:      instrument!.sector,
+            country:     instrument!.country,
+          }
+      const instRes = await marketApi.createInstrument(instPayload)
       const payload = {
         portfolio_id:  Number(portfolioId),
         instrument_id: instRes.data.id,
@@ -259,36 +291,76 @@ export default function TransactionModal({ onClose, onSaved, initial }: Props) {
             </div>
           </div>
 
-          {/* Ticker search */}
+          {/* Ticker search / manual entry */}
           <div>
-            <label className="label">Strumento</label>
-            <TickerSearchInput
-              value={tickerInput}
-              onChange={handleTickerChange}
-              onSelect={handleSelectTicker}
-              placeholder="Cerca per nome o ticker (es: Apple, VWCE, BTP…)"
-              inputClassName="input font-mono pr-8"
-            />
+            <div className="flex items-center justify-between mb-1">
+              <label className="label">Strumento</label>
+              <button type="button" onClick={() => { setManualMode(v => !v); setError('') }}
+                className="text-xs text-gold-500 hover:text-gold-400 transition-colors">
+                {manualMode ? '← Cerca su Yahoo Finance' : 'Non quotato su Yahoo? Inseriscilo manualmente'}
+              </button>
+            </div>
 
-            {/* Resolving spinner */}
-            {resolving && (
-              <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
-                <Loader2 size={12} className="animate-spin" /> Caricamento dettagli…
+            {!manualMode ? (
+              <>
+                <TickerSearchInput
+                  value={tickerInput}
+                  onChange={handleTickerChange}
+                  onSelect={handleSelectTicker}
+                  placeholder="Cerca per nome o ticker (es: Apple, VWCE, BTP…)"
+                  inputClassName="input font-mono pr-8"
+                />
+
+                {/* Resolving spinner */}
+                {resolving && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
+                    <Loader2 size={12} className="animate-spin" /> Caricamento dettagli…
+                  </div>
+                )}
+
+                {/* Resolved instrument chip */}
+                {instrument && !resolving && (
+                  <div className="mt-2 bg-navy-700/50 border border-gray-700/40 rounded-lg px-3 py-2 text-sm flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-gray-100">{instrument.ticker}</span>
+                    <span className="text-gray-400 truncate flex-1">{instrument.name}</span>
+                    <span className="flex-shrink-0 flex items-center gap-1.5">
+                      {typeBadge(instrument.asset_class)}
+                      <span className="text-xs text-gray-500">{instrument.currency}</span>
+                    </span>
+                  </div>
+                )}
+                {resolveError && <p className="text-amber-400 text-xs mt-1.5">{resolveError}</p>}
+              </>
+            ) : (
+              <div className="bg-navy-700/40 border border-gray-600/40 rounded-lg p-3 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">ISIN *</label>
+                    <input className="input font-mono uppercase" placeholder="XS0000000000"
+                      value={manIsin} onChange={e => setManIsin(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Classe</label>
+                    <select className="input" value={manClass} onChange={e => setManClass(e.target.value)}>
+                      {['OTHER', 'BOND', 'EQUITY', 'ETF', 'CRYPTO', 'COMMODITY', 'REAL_ESTATE', 'CASH'].map(ac => (
+                        <option key={ac} value={ac}>{ac === 'OTHER' ? 'OTHER (certificati…)' : ac.replace('_', ' ')}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="label">Nome *</label>
+                  <input className="input" placeholder="es. Memory Cash Collect su Enel"
+                    value={manName} onChange={e => setManName(e.target.value)} />
+                </div>
+                <PriceSourceConfig
+                  value={manSource}
+                  onChange={patch => setManSource(s => ({ ...s, ...patch }))}
+                  isin={manIsin.trim().toUpperCase() || null}
+                  ticker={manIsin.trim().toUpperCase() || null}
+                />
               </div>
             )}
-
-            {/* Resolved instrument chip */}
-            {instrument && !resolving && (
-              <div className="mt-2 bg-navy-700/50 border border-gray-700/40 rounded-lg px-3 py-2 text-sm flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-gray-100">{instrument.ticker}</span>
-                <span className="text-gray-400 truncate flex-1">{instrument.name}</span>
-                <span className="flex-shrink-0 flex items-center gap-1.5">
-                  {typeBadge(instrument.asset_class)}
-                  <span className="text-xs text-gray-500">{instrument.currency}</span>
-                </span>
-              </div>
-            )}
-            {resolveError && <p className="text-amber-400 text-xs mt-1.5">{resolveError}</p>}
           </div>
 
           {/* Date + Quantity */}
@@ -384,7 +456,9 @@ export default function TransactionModal({ onClose, onSaved, initial }: Props) {
 
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">Annulla</button>
-            <button type="submit" disabled={saving || !instrument || !portfolioId} className="btn-primary flex-1">
+            <button type="submit"
+              disabled={saving || !portfolioId || (manualMode ? !manIsin.trim() || !manName.trim() : !instrument)}
+              className="btn-primary flex-1">
               {saving ? 'Salvataggio…' : initial ? 'Aggiorna' : 'Salva Transazione'}
             </button>
           </div>

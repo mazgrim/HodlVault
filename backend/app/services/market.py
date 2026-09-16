@@ -104,6 +104,7 @@ async def _search_symbol(
     if own_client:
         client = httpx.AsyncClient(timeout=10.0)
     try:
+        q_up = query.strip().upper()
         for base in (_SEARCH_URL, _SEARCH_URL_2):
             try:
                 resp = await client.get(base, headers=_HEADERS, params=params)
@@ -111,8 +112,15 @@ async def _search_symbol(
                 quotes = (resp.json() or {}).get("quotes") or []
                 for q in quotes:
                     sym = q.get("symbol")
-                    if sym:
-                        return sym
+                    if not sym:
+                        continue
+                    # Scarta gli pseudo-simboli che SONO l'ISIN (es. "CH1199067674.SG",
+                    # quotazione Stoccarda di un certificato): non sono ticker reali e
+                    # la chart API non ne dà dati. Meglio lasciare vuoto che un valore
+                    # inventato — l'utente lo compila a mano se serve.
+                    if sym.split(".")[0].upper() == q_up:
+                        continue
+                    return sym
             except Exception as exc:
                 logger.debug(f"Search API [{base}] failed for {query!r}: {exc}")
         logger.warning(f"No Yahoo search match for {query!r}")

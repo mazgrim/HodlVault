@@ -265,6 +265,7 @@ def instrument_detail(
     position = next((p for p in all_positions if p.instrument_id == instrument_id), None)
 
     buy_dates = [tx.date.isoformat() for tx in txs if tx.type == models.TransactionType.BUY]
+    sell_dates = [tx.date.isoformat() for tx in txs if tx.type == models.TransactionType.SELL]
 
     svc = MarketService(db)
     last_price_date = svc.latest_price_date(instrument_id)
@@ -323,6 +324,7 @@ def instrument_detail(
             for div in divs
         ],
         "buy_dates": buy_dates,
+        "sell_dates": sell_dates,
     }
 
 

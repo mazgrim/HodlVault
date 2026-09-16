@@ -42,6 +42,8 @@ export const marketApi = {
     api.get('/market/dashboard/kpis', { params: portfolio_id ? { portfolio_id } : {} }),
   positions: (portfolio_id?: number) =>
     api.get('/market/dashboard/positions', { params: portfolio_id ? { portfolio_id } : {} }),
+  closedPositions: (portfolio_id?: number) =>
+    api.get('/market/dashboard/closed-positions', { params: portfolio_id ? { portfolio_id } : {} }),
   chart: (portfolio_id?: number, period = '1Y') =>
     api.get('/market/dashboard/chart', { params: { period, ...(portfolio_id ? { portfolio_id } : {}) } }),
   analysis: (portfolio_id?: number) =>

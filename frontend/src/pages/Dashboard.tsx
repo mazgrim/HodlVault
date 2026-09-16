@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { Receipt, ChevronRight } from 'lucide-react'
+import { Receipt, ChevronRight, ChevronDown, Archive } from 'lucide-react'
 import KpiCard from '../components/KpiCard'
 import ChangeBadge from '../components/ChangeBadge'
 import InfoHint from '../components/InfoHint'
@@ -70,6 +70,23 @@ interface Position {
   total_invested: number
 }
 
+interface ClosedPosition {
+  instrument_id: number
+  ticker: string
+  name: string
+  isin: string | null
+  currency: string
+  quantity: number
+  avg_buy_price: number
+  avg_sell_price: number
+  realized_pnl: number
+  realized_pnl_pct: number
+  current_price: number | null
+  current_value: number | null
+  first_buy_date: string | null
+  last_sell_date: string | null
+}
+
 export default function Dashboard() {
   const { tooltip } = useChartTheme()
   const { portfolios, loading: pfLoading } = usePortfolios()
@@ -82,17 +99,28 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [pnlMode, setPnlMode] = useState<'unrealized' | 'realized'>('unrealized')
   const [showTaxDetail, setShowTaxDetail] = useState(false)
+  const [closed, setClosed] = useState<ClosedPosition[]>([])
+  const [closedCollapsed, setClosedCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('dash_closed_collapsed') === '1' } catch { return false }
+  })
+  const toggleClosed = () => setClosedCollapsed(v => {
+    const next = !v
+    try { localStorage.setItem('dash_closed_collapsed', next ? '1' : '0') } catch { /* ignore */ }
+    return next
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [kRes, pRes, cRes] = await Promise.all([
+      const [kRes, pRes, cRes, clRes] = await Promise.all([
         marketApi.kpis(selectedPf ?? undefined),
         marketApi.positions(selectedPf ?? undefined),
         marketApi.chart(selectedPf ?? undefined, period),
+        marketApi.closedPositions(selectedPf ?? undefined),
       ])
       setKpis(kRes.data)
       setPositions(pRes.data)
+      setClosed(clRes.data)
       setChart(cRes.data.points)
       setChartChange({ abs: cRes.data.change ?? null, pct: cRes.data.change_pct ?? null })
     } catch (e) {
@@ -389,6 +417,79 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+
+          {/* Closed Positions (collapsible) */}
+          {closed.length > 0 && (
+            <div className="card">
+              <button
+                onClick={toggleClosed}
+                className="w-full flex items-center justify-between gap-3 text-left"
+                aria-expanded={!closedCollapsed}
+              >
+                <div className="flex items-center gap-2">
+                  <Archive size={16} className="text-gray-400" />
+                  <h2 className="text-base font-semibold text-gray-200">Posizioni Chiuse</h2>
+                  <span className="text-xs text-gray-500">({closed.length})</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {(() => {
+                    const tot = closed.reduce((s, c) => s + c.realized_pnl, 0)
+                    return (
+                      <span className={`text-sm font-semibold tabular-nums ${pnlClass(tot)}`}>
+                        {pnlSign(tot)}{fmtEur(tot)}
+                      </span>
+                    )
+                  })()}
+                  <ChevronDown size={18} className={`text-gray-400 transition-transform ${closedCollapsed ? '' : 'rotate-180'}`} />
+                </div>
+              </button>
+
+              {!closedCollapsed && (
+                <div className="overflow-x-auto mt-4">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-700/50">
+                        {['Strumento', 'Qtà', 'Prezzo Acq.', 'Prezzo Vend.', 'P&L €', 'P&L %', 'Valore Attuale'].map((h) => (
+                          <th key={h} className="text-left py-2 pr-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {closed.map((c) => (
+                        <tr key={c.instrument_id} className="table-row-hover border-b border-gray-700/20">
+                          <td className="py-3 pr-4">
+                            <Link to={`/instruments/${c.instrument_id}`} className="group">
+                              <div className="font-semibold text-gray-100 group-hover:text-gold-400 transition-colors break-words leading-snug max-w-[240px]" title={c.name}>{c.name}</div>
+                              <div className="text-xs text-gray-500 font-mono mt-0.5">
+                                {c.ticker}{c.last_sell_date ? ` · chiusa il ${fmtDate(c.last_sell_date)}` : ''}
+                              </div>
+                            </Link>
+                          </td>
+                          <td className="py-3 pr-4 tabular-nums text-gray-300">{fmtNum(c.quantity, 4)}</td>
+                          <td className="py-3 pr-4 tabular-nums text-gray-300">{fmtEur(c.avg_buy_price)}</td>
+                          <td className="py-3 pr-4 tabular-nums text-gray-300">{fmtEur(c.avg_sell_price)}</td>
+                          <td className={`py-3 pr-4 tabular-nums font-medium ${pnlClass(c.realized_pnl)}`}>
+                            {pnlSign(c.realized_pnl)}{fmtEur(c.realized_pnl)}
+                          </td>
+                          <td className={`py-3 pr-4 tabular-nums font-medium ${pnlClass(c.realized_pnl_pct)}`}>
+                            {pnlSign(c.realized_pnl_pct)}{fmtPct(c.realized_pnl_pct)}
+                          </td>
+                          <td className="py-3 pr-4 tabular-nums text-gray-400">
+                            {c.current_value != null ? fmtEur(c.current_value) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-[11px] text-gray-600 mt-3">
+                    "Valore Attuale" = prezzo di oggi × quantità venduta: quanto varrebbe la posizione se non l'avessi chiusa.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 

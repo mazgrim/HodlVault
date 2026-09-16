@@ -183,6 +183,93 @@ class DashboardCalculator:
 
         return [schemas.PositionRow(**p) for p in sorted(positions, key=lambda x: -x["market_value"])]
 
+    def closed_positions(self, portfolio_id: Optional[int] = None) -> List[schemas.ClosedPositionRow]:
+        """Posizioni interamente chiuse: strumenti la cui quantità netta è tornata a
+        ~0 dopo almeno una vendita. Prezzi medi di acquisto/vendita in EUR, P&L
+        realizzato (con commissioni) in € e %, più un valore attuale ipotetico
+        (prezzo di oggi × quantità venduta) per confronto."""
+        pids = _user_portfolio_ids(self.user_id, self.db, portfolio_id)
+        if not pids:
+            return []
+
+        txs = (
+            self.db.query(Transaction)
+            .filter(Transaction.portfolio_id.in_(pids))
+            .order_by(Transaction.date)
+            .all()
+        )
+
+        agg: Dict[int, dict] = {}
+        for tx in txs:
+            iid = tx.instrument_id
+            a = agg.get(iid)
+            if a is None:
+                a = agg[iid] = {
+                    "instrument": tx.instrument, "qty": 0.0, "cost_eur": 0.0,
+                    "buy_qty": 0.0, "buy_cost": 0.0, "sell_qty": 0.0, "sell_proceeds": 0.0,
+                    "realized": 0.0, "first_buy": None, "last_sell": None,
+                }
+            price_eur = tx.price / tx.fx_rate if tx.fx_rate else tx.price
+            fees_eur = tx.fees / tx.fx_rate if tx.fx_rate else tx.fees
+
+            if tx.type == TransactionType.BUY:
+                a["cost_eur"] += price_eur * tx.quantity + fees_eur
+                a["qty"] += tx.quantity
+                a["buy_qty"] += tx.quantity
+                a["buy_cost"] += price_eur * tx.quantity + fees_eur
+                if a["first_buy"] is None:
+                    a["first_buy"] = tx.date
+            else:  # SELL
+                if a["qty"] > 0:
+                    avg = a["cost_eur"] / a["qty"]
+                    proceeds = price_eur * tx.quantity - fees_eur
+                    a["realized"] += proceeds - avg * tx.quantity
+                    a["cost_eur"] -= avg * tx.quantity
+                    a["qty"] -= tx.quantity
+                a["sell_qty"] += tx.quantity
+                a["sell_proceeds"] += price_eur * tx.quantity - fees_eur
+                a["last_sell"] = tx.date
+
+        result = []
+        for iid, a in agg.items():
+            # Chiusa: quantità netta ~0 e almeno una vendita.
+            if abs(a["qty"]) > 0.0001 or a["sell_qty"] <= 0.0001:
+                continue
+            inst: Instrument = a["instrument"]
+            buy_qty = a["buy_qty"] or a["sell_qty"]
+            avg_buy = a["buy_cost"] / buy_qty if buy_qty else 0.0
+            avg_sell = a["sell_proceeds"] / a["sell_qty"] if a["sell_qty"] else 0.0
+            realized = a["realized"]
+            realized_pct = (realized / a["buy_cost"] * 100) if a["buy_cost"] else 0.0
+
+            current_price = None
+            current_value = None
+            raw_price = self.market.latest_price(iid)
+            if raw_price is not None:
+                fx = self.market.get_fx_rate_today(inst.currency)
+                current_price = raw_price / fx if fx else raw_price
+                current_value = round(current_price * a["sell_qty"], 2)
+
+            result.append(schemas.ClosedPositionRow(
+                instrument_id=iid,
+                ticker=inst.ticker,
+                name=inst.name,
+                isin=inst.isin,
+                currency=inst.currency,
+                quantity=round(a["sell_qty"], 6),
+                avg_buy_price=round(avg_buy, 4),
+                avg_sell_price=round(avg_sell, 4),
+                realized_pnl=round(realized, 2),
+                realized_pnl_pct=round(realized_pct, 2),
+                current_price=round(current_price, 4) if current_price is not None else None,
+                current_value=current_value,
+                first_buy_date=a["first_buy"],
+                last_sell_date=a["last_sell"],
+            ))
+
+        # Più recenti (per ultima vendita) in cima.
+        return sorted(result, key=lambda r: (r.last_sell_date or date.min), reverse=True)
+
     def kpis(self, portfolio_id: Optional[int] = None) -> schemas.DashboardKPIs:
         positions = self.open_positions(portfolio_id)
         pids = _user_portfolio_ids(self.user_id, self.db, portfolio_id)

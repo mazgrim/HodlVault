@@ -77,6 +77,7 @@ interface InstrumentDetailData {
   transactions: TxRow[]
   dividends: DivRow[]
   buy_dates: string[]
+  sell_dates: string[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -136,6 +137,22 @@ const TriangleUp = (props: any) => {
       points={`${cx},${cy - s} ${cx - s * 0.85},${cy + s * 0.6} ${cx + s * 0.85},${cy + s * 0.6}`}
       fill="#10b981"
       stroke="#065f46"
+      strokeWidth={1}
+      opacity={0.9}
+    />
+  )
+}
+
+/** SVG triangle pointing downward — used as sell marker on the chart. */
+const TriangleDown = (props: any) => {
+  const { cx, cy } = props
+  if (cx == null || cy == null) return null
+  const s = 6
+  return (
+    <polygon
+      points={`${cx},${cy + s} ${cx - s * 0.85},${cy - s * 0.6} ${cx + s * 0.85},${cy - s * 0.6}`}
+      fill="#ef4444"
+      stroke="#7f1d1d"
       strokeWidth={1}
       opacity={0.9}
     />
@@ -244,7 +261,7 @@ export default function InstrumentDetail() {
     )
   }
 
-  const { instrument, position, transactions, dividends, buy_dates } = detail
+  const { instrument, position, transactions, dividends, buy_dates, sell_dates } = detail
 
   // ── Period change (from the visible chart): native price move first→last,
   // plus the EUR move on the held position (price delta at today's FX rate). ──
@@ -266,6 +283,9 @@ export default function InstrumentDetail() {
   // Deduplicated, sorted buy dates
   const sortedBuyDates = [...new Set(buy_dates)].sort()
   const [firstBuyDate, ...otherBuyDates] = sortedBuyDates
+
+  // Deduplicated, sorted sell dates
+  const sortedSellDates = [...new Set(sell_dates ?? [])].sort()
 
   // Nearest chart date for the first buy (for the dashed reference line)
   const firstBuyChartDate = firstBuyDate ? nearestDate(firstBuyDate, priceMap) : null
@@ -472,8 +492,8 @@ export default function InstrumentDetail() {
         ) : (
           <>
             {/* Legend */}
-            {buy_dates.length > 0 && (
-              <div className="flex gap-4 mb-3 text-xs text-gray-400">
+            {(buy_dates.length > 0 || sortedSellDates.length > 0) && (
+              <div className="flex flex-wrap gap-4 mb-3 text-xs text-gray-400">
                 {firstBuyChartDate && (
                   <span className="flex items-center gap-1.5">
                     <svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#D4A017" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
@@ -486,6 +506,14 @@ export default function InstrumentDetail() {
                       <polygon points="6,0 0,12 12,12" fill="#10b981" opacity="0.9" />
                     </svg>
                     Acquisti successivi
+                  </span>
+                )}
+                {sortedSellDates.length > 0 && (
+                  <span className="flex items-center gap-1.5">
+                    <svg width="12" height="12">
+                      <polygon points="0,0 12,0 6,12" fill="#ef4444" opacity="0.9" />
+                    </svg>
+                    Vendite
                   </span>
                 )}
               </div>
@@ -563,6 +591,23 @@ export default function InstrumentDetail() {
                       y={price}
                       r={0}
                       shape={<TriangleUp />}
+                    />
+                  )
+                })}
+
+                {/* Sell dates: downward triangle markers */}
+                {sortedSellDates.map((sd) => {
+                  const chartDate = nearestDate(sd, priceMap)
+                  if (!chartDate) return null
+                  const price = priceMap[chartDate]
+                  if (price == null) return null
+                  return (
+                    <ReferenceDot
+                      key={`sell-${sd}`}
+                      x={chartDate}
+                      y={price}
+                      r={0}
+                      shape={<TriangleDown />}
                     />
                   )
                 })}

@@ -126,6 +126,26 @@ def test_confirm_match_per_nome_crea_dividendo(client, db, portfolio, monkeypatc
     assert ev.source == models.DividendSource.IMPORT
 
 
+def test_preview_suggerisce_ticker_per_nome(client, db, portfolio):
+    # Strumento già in portafoglio: l'anteprima deve suggerire il suo ticker per
+    # i dividendi "Movimenti conto" (senza ISIN), agganciandoli per nome.
+    _held_instrument(db, portfolio, name="ACME CORPORATION")
+    csv = (
+        "Data_Operazione;Data_Valuta;Entrate;Uscite;Descrizione;Descrizione_Completa;Stato\n"
+        "2026-01-02;2025-12-29;0,80;;Dividendo estero;Div.su 10,000 ACME;Contabilizzato\n"
+    )
+    resp = client.post(
+        "/api/import/preview",
+        data={"broker": "fineco", "portfolio_id": str(portfolio.id)},
+        files={"file": ("movimenti.csv", csv, "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()["rows"]
+    assert len(rows) == 1
+    assert rows[0]["is_dividend"] is True
+    assert rows[0]["ticker"] == "ACME"      # suggerito per nome, non vuoto
+
+
 def test_confirm_nome_non_trovato_salta_riga(client, db, portfolio, monkeypatch):
     import app.routers.import_data as imp
     async def _noop(ids):

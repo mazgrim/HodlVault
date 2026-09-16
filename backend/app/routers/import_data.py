@@ -113,6 +113,16 @@ async def import_preview(
         if row.isin and not row.ticker and row.isin in isin_ticker_map:
             row.ticker = isin_ticker_map[row.isin]
 
+    # Dividendi senza ISIN (Fineco "Movimenti conto"): suggerisci il ticker già in
+    # anteprima agganciando il nome a uno strumento già presente nel portafoglio,
+    # invece di lasciarlo vuoto (il match per nome girava solo in fase di conferma).
+    # Resta modificabile dall'utente; se non c'è match il campo resta vuoto.
+    for row in rows:
+        if row.is_dividend and not row.ticker and not row.isin and row.name:
+            inst = _match_instrument_by_name(portfolio_id, row.name, db)
+            if inst:
+                row.ticker = inst.ticker
+
     # Mark duplicates — transactions and dividends use different keys.
     for row in rows:
         if row.is_dividend:

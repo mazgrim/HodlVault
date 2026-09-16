@@ -342,6 +342,25 @@ class PositionRow(BaseModel):
     weight_pct: float
     total_invested: float    # EUR
 
+
+class ClosedPositionRow(BaseModel):
+    """Posizione interamente chiusa (quantità netta ≈ 0, con almeno una vendita)."""
+    instrument_id: int
+    ticker: str
+    name: str
+    isin: Optional[str]
+    currency: str
+    quantity: float             # quantità totale movimentata (= venduta)
+    avg_buy_price: float        # prezzo medio d'acquisto, EUR
+    avg_sell_price: float       # prezzo medio di vendita, EUR
+    realized_pnl: float         # EUR
+    realized_pnl_pct: float
+    current_price: Optional[float] = None   # prezzo attuale, EUR (None se non disponibile)
+    current_value: Optional[float] = None   # valore ipotetico oggi = prezzo × quantità venduta, EUR
+    first_buy_date: Optional[date] = None
+    last_sell_date: Optional[date] = None
+
+
 class DashboardKPIs(BaseModel):
     total_value: float
     total_invested: float

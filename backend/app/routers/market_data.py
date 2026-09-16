@@ -465,6 +465,17 @@ def open_positions(
     return calc.open_positions(portfolio_id)
 
 
+@router.get("/dashboard/closed-positions", response_model=List[schemas.ClosedPositionRow])
+def closed_positions(
+    portfolio_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    from ..services.calculations import DashboardCalculator
+    calc = DashboardCalculator(db, current_user.id)
+    return calc.closed_positions(portfolio_id)
+
+
 @router.get("/dashboard/chart", response_model=schemas.PortfolioChartResponse)
 def portfolio_chart(
     portfolio_id: Optional[int] = Query(None),

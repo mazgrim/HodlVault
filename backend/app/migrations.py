@@ -28,7 +28,7 @@ from sqlalchemy.engine import Engine
 logger = logging.getLogger(__name__)
 
 # Alza questo numero quando aggiungi una migrazione in MIGRATIONS.
-TARGET_VERSION = 4
+TARGET_VERSION = 5
 
 
 # ── Migrazioni ────────────────────────────────────────────────────────────────
@@ -118,12 +118,37 @@ def _migration_4_dividend_source(cur):
     )
 
 
+def _migration_5_dividend_unique_index(cur):
+    """
+    Ripristina il vincolo di unicità dei dividendi. `uq_dividend_event`
+    (un incasso per portafoglio/strumento/data/tipo) è dichiarato nel modello, ma
+    i DB creati prima che venisse aggiunto NON lo hanno (create_all non aggiunge
+    vincoli a tabelle già esistenti). Il sync Yahoo si affidava a quel vincolo per
+    non duplicare: senza, ri-creava lo stesso dividendo a ogni esecuzione.
+
+    Qui: 1) rimuove i duplicati esatti tenendo la riga con id minore; 2) crea
+    l'indice UNIQUE, così il vincolo è finalmente applicato a ogni percorso.
+    Idempotente.
+    """
+    cur.execute(
+        "DELETE FROM dividend_events WHERE id NOT IN ("
+        "  SELECT MIN(id) FROM dividend_events"
+        "  GROUP BY portfolio_id, instrument_id, date, type"
+        ")"
+    )
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_dividend_event "
+        "ON dividend_events (portfolio_id, instrument_id, date, type)"
+    )
+
+
 # Mappa versione → funzione. Le chiavi devono essere consecutive a partire da 1.
 MIGRATIONS = {
     1: _migration_1_baseline,
     2: _migration_2_price_sources,
     3: _migration_3_minus_compensation,
     4: _migration_4_dividend_source,
+    5: _migration_5_dividend_unique_index,
 }
 
 

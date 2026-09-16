@@ -1187,7 +1187,22 @@ class DividendCalculator:
                 ).all()
             ]
 
+            # Idempotenza esplicita: date già presenti per questo (portafoglio,
+            # strumento, tipo). Non ci si affida al solo vincolo DB uq_dividend_event
+            # perché i DB creati prima della sua introduzione non ce l'hanno, e il
+            # sync finiva per duplicare lo stesso dividendo a ogni esecuzione.
+            existing_dates = {
+                d for (d,) in self.db.query(DividendEvent.date).filter(
+                    DividendEvent.portfolio_id == pid,
+                    DividendEvent.instrument_id == iid,
+                    DividendEvent.type == div_type,
+                ).all()
+            }
+
             for ex_date, per_share in divs:
+                # Già registrato (stesso portafoglio/strumento/data/tipo)?
+                if ex_date in existing_dates:
+                    continue
                 # Un incasso reale (broker/manuale) copre già questo dividendo?
                 if any(0 <= (bd_date - ex_date).days <= _DIVIDEND_RECONCILE_DAYS
                        for bd_date in broker_dates):

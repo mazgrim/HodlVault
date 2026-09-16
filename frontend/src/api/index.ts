@@ -112,6 +112,10 @@ export const divApi = {
     api.patch(`/dividends/${id}/minus-compensation`, { minus_compensation }),
   sync: (portfolio_id?: number) =>
     api.post('/dividends/sync', null, { params: portfolio_id ? { portfolio_id } : {} }),
+  duplicates: (portfolio_id?: number) =>
+    api.get('/dividends/duplicates', { params: portfolio_id ? { portfolio_id } : {} }),
+  deduplicate: (portfolio_id?: number) =>
+    api.post('/dividends/deduplicate', null, { params: portfolio_id ? { portfolio_id } : {} }),
   kpis: (portfolio_id?: number) =>
     api.get('/dividends/kpis', { params: portfolio_id ? { portfolio_id } : {} }),
   monthly: (portfolio_id?: number) =>

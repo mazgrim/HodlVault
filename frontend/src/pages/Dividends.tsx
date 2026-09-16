@@ -8,7 +8,7 @@ import { usePortfolios } from '../context/PortfoliosContext'
 import { divApi, couponApi } from '../api'
 import { fmtEur, fmtPct, fmtDate, fmtMonth, fmtNum } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
-import { Landmark, TrendingUp, Calendar, Search, X, Trash2, RefreshCw, Receipt, CalendarClock, Scale } from 'lucide-react'
+import { Landmark, TrendingUp, Calendar, Search, X, Trash2, RefreshCw, Receipt, CalendarClock, Scale, Layers, AlertTriangle } from 'lucide-react'
 
 interface DividendEvent {
   id: number; instrument_id: number; date: string; amount: number; currency: string; fx_rate: number
@@ -25,6 +25,7 @@ interface UpcomingCoupon {
   quantity: number; estimated_total: number; estimated_total_eur: number
 }
 interface KPIs { total_ytd: number; total_all_time: number; total_gross: number; total_tax: number; avg_yield_on_cost: number }
+interface DividendDuplicate { id: number; portfolio_id: number; date: string; instrument_name: string; net_eur: number; covered_by_date: string }
 
 export default function Dividends() {
   const { tooltip, neutralSeries, barCursor } = useChartTheme()
@@ -40,6 +41,11 @@ export default function Dividends() {
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+
+  // ── Deduplica (broker vince su Yahoo) ───────────────────────────────────────
+  const [dupes, setDupes] = useState<DividendDuplicate[] | null>(null)  // null = modale chiusa
+  const [dupeLoading, setDupeLoading] = useState(false)
+  const [dedupRunning, setDedupRunning] = useState(false)
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [search, setSearch] = useState('')
@@ -190,6 +196,31 @@ export default function Dividends() {
     }
   }
 
+  const handleCheckDuplicates = async () => {
+    setDupeLoading(true)
+    try {
+      const res = await divApi.duplicates(selectedPf ?? undefined)
+      setDupes(res.data)
+    } finally {
+      setDupeLoading(false)
+    }
+  }
+
+  const handleDeduplicate = async () => {
+    setDedupRunning(true)
+    try {
+      const res = await divApi.deduplicate(selectedPf ?? undefined)
+      const n = res.data?.deleted ?? 0
+      setDupes(null)
+      setSyncMsg(n > 0
+        ? `${n} dividend${n === 1 ? 'o' : 'i'} Yahoo duplicat${n === 1 ? 'o' : 'i'} rimoss${n === 1 ? 'o' : 'i'}.`
+        : 'Nessun duplicato da rimuovere.')
+      if (n > 0) await load()
+    } finally {
+      setDedupRunning(false)
+    }
+  }
+
   const clearFilters = () => {
     setSearch(''); setFilterType('ALL'); setDateFrom(''); setDateTo('')
   }
@@ -213,6 +244,15 @@ export default function Dividends() {
           >
             <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
             {syncing ? 'Sincronizzo…' : 'Sincronizza dividendi'}
+          </button>
+          <button
+            onClick={handleCheckDuplicates}
+            disabled={dupeLoading}
+            className="btn-secondary text-sm flex items-center gap-2 disabled:opacity-50"
+            title="Rimuove i dividendi Yahoo che un import reale già copre (broker vince). Mostra l'anteprima prima di cancellare."
+          >
+            <Layers size={15} />
+            {dupeLoading ? 'Controllo…' : 'Deduplica'}
           </button>
           <PortfolioSelector portfolios={portfolios} selected={selectedPf} onChange={setSelectedPf} />
         </div>
@@ -582,6 +622,75 @@ export default function Dividends() {
             )}
           </div>
         </>
+      )}
+
+      {/* ── Modale Deduplica ─────────────────────────────────────────────── */}
+      {dupes !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !dedupRunning && setDupes(null)}>
+          <div className="card max-w-2xl w-full max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-100 flex items-center gap-2">
+                <Layers size={16} className="text-gold-500" /> Deduplica dividendi
+              </h3>
+              <button onClick={() => !dedupRunning && setDupes(null)} className="text-gray-500 hover:text-gray-300" title="Chiudi">
+                <X size={16} />
+              </button>
+            </div>
+
+            {dupes.length === 0 ? (
+              <p className="text-sm text-gray-400 py-6 text-center">
+                Nessun duplicato trovato. Ogni dividendo Yahoo non è coperto da un import reale.
+              </p>
+            ) : (
+              <>
+                <div className="flex items-start gap-2 text-xs text-amber-300/90 bg-amber-900/20 border border-amber-700/30 rounded-lg px-3 py-2 mb-3">
+                  <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>
+                    Questi {dupes.length} incass{dupes.length === 1 ? 'o' : 'i'} di fonte <strong>Yahoo</strong> sono già coperti da un import reale del broker
+                    (stesso titolo, pagamento entro 60 giorni dalla ex-date). Verranno <strong>rimossi</strong>; gli import restano. Operazione non annullabile.
+                  </span>
+                </div>
+                <div className="overflow-y-auto flex-1 -mx-1 px-1">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-700/50">
+                        {['Data (ex)', 'Strumento', 'Netto €', 'Coperto da (import)'].map(h => (
+                          <th key={h} className="text-left py-2 pr-4 text-xs font-medium text-gray-400 uppercase last:pr-0">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dupes.map(d => (
+                        <tr key={d.id} className="border-b border-gray-700/20 last:border-0">
+                          <td className="py-2 pr-4 text-gray-300 whitespace-nowrap">{fmtDate(d.date)}</td>
+                          <td className="py-2 pr-4 text-gray-100 truncate max-w-[220px]">{d.instrument_name}</td>
+                          <td className="py-2 pr-4 tabular-nums text-gray-300">{fmtEur(d.net_eur)}</td>
+                          <td className="py-2 text-gray-400 whitespace-nowrap">{fmtDate(d.covered_by_date)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            <div className="flex items-center justify-end gap-3 mt-4 pt-3 border-t border-gray-700/40">
+              <button onClick={() => setDupes(null)} disabled={dedupRunning} className="btn-secondary text-sm disabled:opacity-50">
+                {dupes.length === 0 ? 'Chiudi' : 'Annulla'}
+              </button>
+              {dupes.length > 0 && (
+                <button
+                  onClick={handleDeduplicate}
+                  disabled={dedupRunning}
+                  className="text-sm flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600/90 hover:bg-red-600 text-white font-semibold transition-colors disabled:opacity-50"
+                >
+                  <Trash2 size={14} />
+                  {dedupRunning ? 'Rimozione…' : `Rimuovi ${dupes.length}`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

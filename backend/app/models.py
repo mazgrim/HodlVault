@@ -20,6 +20,17 @@ class DividendType(str, enum.Enum):
     CERT_COUPON = "CERT_COUPON"  # cedola certificato (26%; se condizionata è reddito diverso)
 
 
+class DividendSource(str, enum.Enum):
+    """Come è entrato l'evento nel sistema. Serve alla regola di riconciliazione
+    'broker se presente, altrimenti Yahoo': il sync Yahoo salta un dividendo se
+    per lo stesso strumento esiste già un incasso di fonte non-Yahoo nella
+    finestra ex-date → pagamento."""
+    IMPORT = "IMPORT"    # importato da file broker (Fineco/Directa/Trade Republic)
+    YAHOO = "YAHOO"      # generato dal sync automatico da Yahoo Finance
+    MANUAL = "MANUAL"    # inserito a mano
+    COUPON = "COUPON"    # creato dalla conferma del piano cedole di un certificato
+
+
 class PriceSource(str, enum.Enum):
     YAHOO = "YAHOO"              # chart API Yahoo Finance (default, comportamento storico)
     MANUAL = "MANUAL"            # prezzo inserito a mano dall'utente
@@ -148,6 +159,8 @@ class DividendEvent(Base):
     currency = Column(String(8), default="EUR")
     fx_rate = Column(Float, default=1.0)
     type = Column(Enum(DividendType), default=DividendType.DIVIDEND)
+    # Origine dell'evento (import broker / sync Yahoo / manuale / cedola).
+    source = Column(Enum(DividendSource), default=DividendSource.IMPORT, nullable=False)
     # Compensazione minusvalenze (solo cedole certificati): l'imposta è assorbita
     # dallo zainetto fiscale, quindi netto = lordo e tasse a zero.
     minus_compensation = Column(Boolean, default=False, nullable=False)

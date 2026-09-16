@@ -134,6 +134,7 @@ def _build_backup(user: models.User, db: Session) -> dict:
             "currency": d.currency,
             "fx_rate": d.fx_rate,
             "type": d.type.value,
+            "source": d.source.value if d.source else "IMPORT",
         })
 
     return {
@@ -546,6 +547,10 @@ def _do_import(data: dict, user: models.User, db: Session, dry_run: bool):
                 dtype = models.DividendType(dv.get("type") or "DIVIDEND")
             except ValueError:
                 dtype = models.DividendType.DIVIDEND
+            try:
+                dsource = models.DividendSource(dv.get("source") or "IMPORT")
+            except ValueError:
+                dsource = models.DividendSource.IMPORT
             obj = models.DividendEvent(
                 portfolio_id=portfolio.id,
                 instrument_id=inst.id,
@@ -558,6 +563,7 @@ def _do_import(data: dict, user: models.User, db: Session, dry_run: bool):
                 currency=dv.get("currency") or "EUR",
                 fx_rate=dv.get("fx_rate") or 1.0,
                 type=dtype,
+                source=dsource,
             )
             try:
                 with db.begin_nested():

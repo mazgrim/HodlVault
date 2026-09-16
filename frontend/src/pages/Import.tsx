@@ -24,15 +24,17 @@ interface Preview { total: number; duplicates: number }
 const BROKERS = ['Fineco', 'Directa', 'Trade Republic']
 
 // Istruzioni su dove esportare i file, per broker (mostrate in base alla selezione).
-const EXPORT_HELP: Record<string, { title: string; steps: string }[]> = {
+const EXPORT_HELP: Record<string, { title: string; steps: string; imports?: string }[]> = {
   Fineco: [
-    {
-      title: 'Movimenti conto',
-      steps: 'Sezione Account → movimenti, seleziona il periodo desiderato, poi "Esporta in Excel" (in basso a destra).',
-    },
     {
       title: 'Ordini e contabili',
       steps: 'Sezione Account → menu "Ordini e contabili", seleziona il periodo desiderato, poi "Esporta in Excel" (in basso a sinistra).',
+      imports: 'Importa compravendite e dividendi (con ISIN). È il file consigliato per caricare le operazioni.',
+    },
+    {
+      title: 'Movimenti conto',
+      steps: 'Sezione Account → movimenti, seleziona il periodo desiderato, poi "Esporta in Excel" (in basso a destra).',
+      imports: 'Importa solo i dividendi con la relativa ritenuta estera. Il titolo viene riconosciuto per nome, quindi deve essere già presente nel portafoglio (caricalo prima con "Ordini e contabili"). Compravendite, bolli e altre imposte non vengono importati.',
     },
   ],
   'Trade Republic': [
@@ -250,6 +252,7 @@ export default function Import() {
                       <span className="text-gold-400/90 font-medium">
                         {EXPORT_HELP[broker].length > 1 ? `${i + 1}) ` : ''}{m.title}
                       </span> — {m.steps}
+                      {m.imports && <span className="block text-gray-500 mt-0.5">{m.imports}</span>}
                     </li>
                   ))}
                 </ul>

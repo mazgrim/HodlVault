@@ -85,6 +85,51 @@ async def _fetch_chart(
             await client.aclose()
 
 
+_SEARCH_URL   = "https://query1.finance.yahoo.com/v1/finance/search"
+_SEARCH_URL_2 = "https://query2.finance.yahoo.com/v1/finance/search"
+
+
+async def _search_symbol(
+    query: str, client: Optional[httpx.AsyncClient] = None
+) -> Optional[str]:
+    """Risolve una query libera (es. un ISIN) nel ticker Yahoo via la search API.
+
+    La chart API accetta solo ticker, non ISIN: per agganciare un ISIN al suo
+    simbolo serve questo endpoint. Restituisce il primo symbol azionario/ETF, o
+    None. Fallback su query2."""
+    if not query:
+        return None
+    params = {"q": query, "quotesCount": 5, "newsCount": 0}
+    own_client = client is None
+    if own_client:
+        client = httpx.AsyncClient(timeout=10.0)
+    try:
+        q_up = query.strip().upper()
+        for base in (_SEARCH_URL, _SEARCH_URL_2):
+            try:
+                resp = await client.get(base, headers=_HEADERS, params=params)
+                resp.raise_for_status()
+                quotes = (resp.json() or {}).get("quotes") or []
+                for q in quotes:
+                    sym = q.get("symbol")
+                    if not sym:
+                        continue
+                    # Scarta gli pseudo-simboli che SONO l'ISIN (es. "CH1199067674.SG",
+                    # quotazione Stoccarda di un certificato): non sono ticker reali e
+                    # la chart API non ne dà dati. Meglio lasciare vuoto che un valore
+                    # inventato — l'utente lo compila a mano se serve.
+                    if sym.split(".")[0].upper() == q_up:
+                        continue
+                    return sym
+            except Exception as exc:
+                logger.debug(f"Search API [{base}] failed for {query!r}: {exc}")
+        logger.warning(f"No Yahoo search match for {query!r}")
+        return None
+    finally:
+        if own_client:
+            await client.aclose()
+
+
 def _extract_dividends(result: dict) -> List[tuple]:
     """Return list of (ex_date, amount_per_share) from a chart result's events.
     Amount is the dividend per share in the security's own currency."""
@@ -448,8 +493,11 @@ class MarketService:
     async def lookup_instrument(
         self, isin: Optional[str] = None, ticker: Optional[str] = None
     ) -> Optional[dict]:
-        """Resolve instrument info from Yahoo Finance chart API."""
-        search_ticker = ticker or isin
+        """Resolve instrument info from Yahoo Finance. Con solo l'ISIN, prima lo
+        traduce in ticker via la search API (la chart API non accetta ISIN)."""
+        search_ticker = ticker
+        if not search_ticker and isin:
+            search_ticker = await _search_symbol(isin)
         if not search_ticker:
             return None
         try:

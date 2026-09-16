@@ -25,6 +25,90 @@ PARSERS = {
 }
 
 
+def _norm_name(s: str) -> str:
+    return " ".join((s or "").upper().split())
+
+
+def _match_instrument_by_name(portfolio_id: int, name: str, db: Session):
+    """Resolve a security by NAME, restricted to instruments already held in this
+    portfolio (they have at least one transaction here). Used for dividends imported
+    from the Fineco "Movimenti conto" export, which carries no ISIN/ticker.
+
+    Returns the instrument only on an unambiguous match; None otherwise (caller skips
+    the row) — we never invent a new instrument from a bare name.
+    """
+    target = _norm_name(name)
+    if not target:
+        return None
+    held = (
+        db.query(models.Instrument)
+        .join(models.Transaction, models.Transaction.instrument_id == models.Instrument.id)
+        .filter(models.Transaction.portfolio_id == portfolio_id)
+        .distinct()
+        .all()
+    )
+    exact = [i for i in held if _norm_name(i.name) == target]
+    if len(exact) == 1:
+        return exact[0]
+    if exact:
+        return None  # ambiguo
+    # Prefisso: "NVIDIA" ↔ "NVIDIA CORPORATION"
+    prefix = [
+        i for i in held
+        if _norm_name(i.name).startswith(target + " ") or target.startswith(_norm_name(i.name) + " ")
+    ]
+    return prefix[0] if len(prefix) == 1 else None
+
+
+def _annotate_position_warnings(rows: list, portfolio_id: int, db: Session) -> None:
+    """Segnala le VENDITE che porterebbero la posizione in negativo — tipicamente
+    un file che contiene il SELL ma non il BUY corrispondente (che magari non è
+    stato importato). Considera la posizione già presente nel portafoglio più i
+    BUY presenti nell'import stesso, in ordine cronologico. Avviso non bloccante."""
+    trades = [r for r in rows if not r.is_dividend]
+    if not trades:
+        return
+
+    def _key(r) -> str:
+        if r.isin:
+            return "I:" + r.isin.upper()
+        if r.ticker:
+            return "T:" + r.ticker.upper()
+        return "N:" + (r.name or "").upper()
+
+    # Posizione di partenza per ogni strumento: dalle transazioni già registrate.
+    start: dict = {}
+    for r in trades:
+        k = _key(r)
+        if k in start:
+            continue
+        inst = None
+        if r.isin:
+            inst = db.query(models.Instrument).filter(models.Instrument.isin == r.isin).first()
+        if not inst and r.ticker:
+            inst = db.query(models.Instrument).filter(models.Instrument.ticker == r.ticker).first()
+        pos = 0.0
+        if inst:
+            for t in db.query(models.Transaction).filter(
+                models.Transaction.portfolio_id == portfolio_id,
+                models.Transaction.instrument_id == inst.id,
+            ).all():
+                pos += t.quantity if t.type == models.TransactionType.BUY else -t.quantity
+        start[k] = pos
+
+    # Applica in ordine cronologico i movimenti dell'import; una vendita che porta
+    # sotto zero non ha un acquisto a copertura.
+    running = dict(start)
+    for r in sorted(trades, key=lambda x: x.date):
+        k = _key(r)
+        if r.type == models.TransactionType.BUY:
+            running[k] = running.get(k, 0.0) + r.quantity
+        else:
+            running[k] = running.get(k, 0.0) - r.quantity
+            if running[k] < -1e-6:
+                r.warning = "Vendita senza acquisto corrispondente: la posizione diventerebbe negativa. Manca il BUY nel file?"
+
+
 def _check_portfolio(portfolio_id: int, user_id: int, db: Session):
     p = db.query(models.Portfolio).filter(
         models.Portfolio.id == portfolio_id,
@@ -78,12 +162,25 @@ async def import_preview(
         if row.isin and not row.ticker and row.isin in isin_ticker_map:
             row.ticker = isin_ticker_map[row.isin]
 
+    # Dividendi senza ISIN (Fineco "Movimenti conto"): suggerisci il ticker già in
+    # anteprima agganciando il nome a uno strumento già presente nel portafoglio,
+    # invece di lasciarlo vuoto (il match per nome girava solo in fase di conferma).
+    # Resta modificabile dall'utente; se non c'è match il campo resta vuoto.
+    for row in rows:
+        if row.is_dividend and not row.ticker and not row.isin and row.name:
+            inst = _match_instrument_by_name(portfolio_id, row.name, db)
+            if inst:
+                row.ticker = inst.ticker
+
     # Mark duplicates — transactions and dividends use different keys.
     for row in rows:
         if row.is_dividend:
             row.duplicate = _is_dividend_duplicate(portfolio_id, row, db)
         else:
             row.duplicate = _is_duplicate(portfolio_id, row, db)
+
+    # Segnala le vendite senza acquisto a copertura (posizione negativa).
+    _annotate_position_warnings(rows, portfolio_id, db)
 
     return schemas.ImportPreview(
         rows=rows,
@@ -115,47 +212,60 @@ async def import_confirm(
             skipped += 1
             continue
 
-        # A row with no ticker AND no ISIN cannot be resolved at all
-        if not row.ticker and not row.isin:
-            no_ticker += 1
-            continue
+        # Dividends without ISIN/ticker (Fineco "Movimenti conto"): match by name
+        # against instruments already held in this portfolio. If unresolved, skip —
+        # never invent an instrument from a bare name.
+        if row.is_dividend and not row.ticker and not row.isin:
+            instrument = _match_instrument_by_name(payload.portfolio_id, row.name, db)
+            if not instrument:
+                no_ticker += 1
+                continue
+            is_new = False
+        else:
+            # A row with no ticker AND no ISIN cannot be resolved at all
+            if not row.ticker and not row.isin:
+                no_ticker += 1
+                continue
 
-        # Check if instrument existed before this import
-        existing = None
-        if row.isin:
-            existing = db.query(models.Instrument).filter(models.Instrument.isin == row.isin).first()
-        if not existing and row.ticker:
-            existing = db.query(models.Instrument).filter(models.Instrument.ticker == row.ticker).first()
-        is_new = existing is None
+            # Check if instrument existed before this import
+            existing = None
+            if row.isin:
+                existing = db.query(models.Instrument).filter(models.Instrument.isin == row.isin).first()
+            if not existing and row.ticker:
+                existing = db.query(models.Instrument).filter(models.Instrument.ticker == row.ticker).first()
+            is_new = existing is None
 
-        instrument = await svc.get_or_create_instrument(
-            isin=row.isin, ticker=row.ticker, name=row.name
-        )
-        if not instrument:
-            no_ticker += 1
-            continue
+            instrument = await svc.get_or_create_instrument(
+                isin=row.isin, ticker=row.ticker, name=row.name
+            )
+            if not instrument:
+                no_ticker += 1
+                continue
 
         fx_rate = await svc.get_fx_rate_for_date(row.currency, row.date)
         if row.is_dividend:
             # Store amounts in ORIGINAL currency + fx_rate; the calculator converts
-            # to EUR (amount / fx_rate). `row.price` is the LORDO; `row.fees` carries
-            # the broker's real withholding when available (es. Trade Republic).
-            # "CSV reale": use the real tax if present, otherwise net = gross (no tax
-            # invented — Fineco/Directa only report the net credited).
+            # to EUR (amount / fx_rate). `row.price` is the LORDO; `row.foreign_tax`
+            # is the real foreign withholding (Fineco "Movimenti conto") and
+            # `row.fees` any Italian substitute tax the file reports. "CSV reale":
+            # use real taxes if present, otherwise net = gross (no tax invented —
+            # Fineco/Directa dossier only report the net credited).
             gross = round(row.price, 4)
-            tax = round(row.fees, 4) if row.fees else 0.0
+            foreign = round(row.foreign_tax, 4) if row.foreign_tax else 0.0
+            italian = round(row.fees, 4) if row.fees else 0.0
             obj = models.DividendEvent(
                 portfolio_id=payload.portfolio_id,
                 instrument_id=instrument.id,
                 date=row.date,
-                amount=round(gross - tax, 4),
+                amount=round(gross - foreign - italian, 4),
                 gross_amount=gross,
-                foreign_tax_amount=0.0,
-                tax_amount=tax,
+                foreign_tax_amount=foreign,
+                tax_amount=italian,
                 accrued_interest=0.0,
                 currency=row.currency,
                 fx_rate=fx_rate,
                 type=models.DividendType.DIVIDEND,
+                source=models.DividendSource.IMPORT,
             )
         else:
             obj = models.Transaction(
@@ -244,6 +354,9 @@ def _is_dividend_duplicate(portfolio_id: int, row: schemas.ParsedTransaction, db
         inst = db.query(models.Instrument).filter(models.Instrument.isin == row.isin).first()
     if not inst and row.ticker:
         inst = db.query(models.Instrument).filter(models.Instrument.ticker == row.ticker).first()
+    if not inst and not row.isin and not row.ticker:
+        # Fineco "Movimenti conto": nessun ISIN/ticker → match per nome nel portafoglio
+        inst = _match_instrument_by_name(portfolio_id, row.name, db)
     if not inst:
         return False
     return db.query(models.DividendEvent).filter(

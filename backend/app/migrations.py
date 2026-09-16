@@ -28,7 +28,7 @@ from sqlalchemy.engine import Engine
 logger = logging.getLogger(__name__)
 
 # Alza questo numero quando aggiungi una migrazione in MIGRATIONS.
-TARGET_VERSION = 3
+TARGET_VERSION = 5
 
 
 # ── Migrazioni ────────────────────────────────────────────────────────────────
@@ -86,11 +86,69 @@ def _migration_3_minus_compensation(cur):
         cur.execute("ALTER TABLE dividend_events ADD COLUMN minus_compensation BOOLEAN NOT NULL DEFAULT 0")
 
 
+def _migration_4_dividend_source(cur):
+    """
+    Traccia l'origine di ogni incasso (`dividend_events.source`) per la regola
+    'broker se presente, altrimenti Yahoo'. Backfill delle righe storiche (prima
+    di questa versione l'origine non era registrata):
+
+      - CERT_COUPON          → 'COUPON'  (conferma piano cedole certificati)
+      - foreign_tax_amount>0 → 'YAHOO'   (vedi sotto)
+      - tutto il resto       → 'IMPORT'  (default della colonna)
+
+    Marcatore affidabile: SOLO il sync Yahoo (`DividendCalculator.sync_from_market`
+    via `compute_net`) scrive una ritenuta estera in `foreign_tax_amount`. Tutti
+    gli import broker storici (Fineco/Directa/Trade Republic) azzeravano quel campo
+    e mettevano l'eventuale tassa in `tax_amount`. Quindi `foreign_tax_amount > 0`
+    identifica univocamente il sync Yahoo, senza confondere un dividendo TR estero
+    (USD, cambio reale) con uno Yahoo. Resta un solo caso ambiguo — un dividendo
+    Yahoo da un paese senza ritenuta (foreign_tax=0) — che ricade in 'IMPORT': è
+    innocuo, da qui in avanti l'origine è scritta esplicitamente a ogni creazione.
+    """
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(dividend_events)").fetchall()}
+    if "source" not in existing:
+        cur.execute(
+            "ALTER TABLE dividend_events ADD COLUMN source VARCHAR(8) NOT NULL DEFAULT 'IMPORT'"
+        )
+    # Backfill (la colonna nasce a 'IMPORT', qui promuoviamo COUPON e YAHOO).
+    cur.execute("UPDATE dividend_events SET source = 'COUPON' WHERE type = 'CERT_COUPON'")
+    cur.execute(
+        "UPDATE dividend_events SET source = 'YAHOO' "
+        "WHERE type <> 'CERT_COUPON' AND foreign_tax_amount > 0"
+    )
+
+
+def _migration_5_dividend_unique_index(cur):
+    """
+    Ripristina il vincolo di unicità dei dividendi. `uq_dividend_event`
+    (un incasso per portafoglio/strumento/data/tipo) è dichiarato nel modello, ma
+    i DB creati prima che venisse aggiunto NON lo hanno (create_all non aggiunge
+    vincoli a tabelle già esistenti). Il sync Yahoo si affidava a quel vincolo per
+    non duplicare: senza, ri-creava lo stesso dividendo a ogni esecuzione.
+
+    Qui: 1) rimuove i duplicati esatti tenendo la riga con id minore; 2) crea
+    l'indice UNIQUE, così il vincolo è finalmente applicato a ogni percorso.
+    Idempotente.
+    """
+    cur.execute(
+        "DELETE FROM dividend_events WHERE id NOT IN ("
+        "  SELECT MIN(id) FROM dividend_events"
+        "  GROUP BY portfolio_id, instrument_id, date, type"
+        ")"
+    )
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_dividend_event "
+        "ON dividend_events (portfolio_id, instrument_id, date, type)"
+    )
+
+
 # Mappa versione → funzione. Le chiavi devono essere consecutive a partire da 1.
 MIGRATIONS = {
     1: _migration_1_baseline,
     2: _migration_2_price_sources,
     3: _migration_3_minus_compensation,
+    4: _migration_4_dividend_source,
+    5: _migration_5_dividend_unique_index,
 }
 
 

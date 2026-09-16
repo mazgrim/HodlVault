@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..models import (
     Transaction, Portfolio, Instrument, PriceHistory, DividendEvent, FxRate, TransactionType,
-    DividendType, EtfProfile, EtfHolding, EtfSectorWeight, EtfRegionWeight, SecurityProfile, AssetClass,
+    DividendType, DividendSource, EtfProfile, EtfHolding, EtfSectorWeight, EtfRegionWeight, SecurityProfile, AssetClass,
 )
 from .market import MarketService
 from . import taxonomy
@@ -970,6 +970,12 @@ class PerformanceCalculator:
 
 # ── Dividend Calculations ─────────────────────────────────────────────────────
 
+# Finestra (giorni) entro cui un incasso broker/manuale, datato alla data di
+# pagamento, "copre" il dividendo Yahoo datato alla ex-date: sotto i ~90 giorni
+# tra due dividendi trimestrali, così non fonde per errore eventi distinti.
+_DIVIDEND_RECONCILE_DAYS = 60
+
+
 class DividendCalculator:
     def __init__(self, db: Session, user_id: int):
         self.db = db
@@ -1167,7 +1173,41 @@ class DividendCalculator:
             )
             inst_txs_sorted = sorted(inst_txs, key=lambda t: t.date)
 
+            # Riconciliazione "broker se presente, altrimenti Yahoo": raccolgo le
+            # date degli incassi NON-Yahoo già registrati per questo strumento nel
+            # portafoglio (import broker o manuali). Un dividendo Yahoo viene
+            # saltato se un incasso non-Yahoo cade tra la ex-date e +N giorni,
+            # perché broker e Yahoo datano lo stesso dividendo in modo diverso
+            # (Yahoo = ex-date, broker = data pagamento, alcune settimane dopo).
+            broker_dates = [
+                d for (d,) in self.db.query(DividendEvent.date).filter(
+                    DividendEvent.portfolio_id == pid,
+                    DividendEvent.instrument_id == iid,
+                    DividendEvent.source != DividendSource.YAHOO,
+                ).all()
+            ]
+
+            # Idempotenza esplicita: date già presenti per questo (portafoglio,
+            # strumento, tipo). Non ci si affida al solo vincolo DB uq_dividend_event
+            # perché i DB creati prima della sua introduzione non ce l'hanno, e il
+            # sync finiva per duplicare lo stesso dividendo a ogni esecuzione.
+            existing_dates = {
+                d for (d,) in self.db.query(DividendEvent.date).filter(
+                    DividendEvent.portfolio_id == pid,
+                    DividendEvent.instrument_id == iid,
+                    DividendEvent.type == div_type,
+                ).all()
+            }
+
             for ex_date, per_share in divs:
+                # Già registrato (stesso portafoglio/strumento/data/tipo)?
+                if ex_date in existing_dates:
+                    continue
+                # Un incasso reale (broker/manuale) copre già questo dividendo?
+                if any(0 <= (bd_date - ex_date).days <= _DIVIDEND_RECONCILE_DAYS
+                       for bd_date in broker_dates):
+                    continue
+
                 # Shares held the day before the ex-date (a same-day buy isn't entitled)
                 qty = 0.0
                 for tx in inst_txs_sorted:
@@ -1193,6 +1233,7 @@ class DividendCalculator:
                     currency=inst.currency,
                     fx_rate=fx,
                     type=div_type,
+                    source=DividendSource.YAHOO,
                 )
                 # Per-row savepoint: a duplicate (unique-constraint) skips just this row.
                 try:
@@ -1205,5 +1246,38 @@ class DividendCalculator:
 
         self.db.commit()
         return created
+
+    def find_yahoo_duplicates(self, portfolio_id: Optional[int] = None) -> List[Tuple[DividendEvent, date]]:
+        """Incassi di fonte YAHOO che un incasso reale (import broker/manuale) già
+        copre: stesso strumento nel portafoglio, con la data broker (pagamento)
+        tra la ex-date Yahoo e +N giorni. Stessa regola della riconciliazione nel
+        sync — qui applicata retroattivamente per deduplicare lo storico.
+
+        Ritorna coppie (evento YAHOO duplicato, data dell'import che lo copre)."""
+        pids = _user_portfolio_ids(self.user_id, self.db, portfolio_id)
+        if not pids:
+            return []
+        divs = (
+            self.db.query(DividendEvent)
+            .filter(DividendEvent.portfolio_id.in_(pids))
+            .order_by(DividendEvent.date)
+            .all()
+        )
+        broker_dates: Dict[Tuple[int, int], List] = defaultdict(list)
+        for d in divs:
+            if d.source != DividendSource.YAHOO:
+                broker_dates[(d.portfolio_id, d.instrument_id)].append(d.date)
+
+        dupes: List[Tuple[DividendEvent, date]] = []
+        for d in divs:
+            if d.source != DividendSource.YAHOO:
+                continue
+            covering = sorted(
+                bd for bd in broker_dates.get((d.portfolio_id, d.instrument_id), [])
+                if 0 <= (bd - d.date).days <= _DIVIDEND_RECONCILE_DAYS
+            )
+            if covering:
+                dupes.append((d, covering[0]))
+        return dupes
 
 

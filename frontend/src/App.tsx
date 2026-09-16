@@ -13,6 +13,7 @@ import Backup from './pages/Backup'
 import Tools from './pages/Tools'
 import Admin from './pages/Admin'
 import Transactions from './pages/Transactions'
+import Portfolios from './pages/Portfolios'
 import InstrumentDetail from './pages/InstrumentDetail'
 import Benchmark from './pages/Benchmark'
 import { PageSpinner } from './components/Spinner'
@@ -56,6 +57,7 @@ function App() {
               <Route path="analysis"    element={<Analysis />} />
               <Route path="dividends"   element={<Dividends />} />
               <Route path="transactions" element={<Transactions />} />
+              <Route path="portfolios"   element={<Portfolios />} />
               <Route path="import"      element={<Import />} />
               <Route path="backup"      element={<Backup />} />
               <Route path="tools"       element={<Tools />} />

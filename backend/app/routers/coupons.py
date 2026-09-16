@@ -226,6 +226,7 @@ async def confirm_coupon(
         currency=inst.currency,
         fx_rate=fx,
         type=models.DividendType.CERT_COUPON,
+        source=models.DividendSource.COUPON,
         minus_compensation=payload.minus_compensation,
     )
     db.add(ev)

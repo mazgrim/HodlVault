@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field, field_validator, computed_field
-from .models import TransactionType, DividendType, AssetClass, PriceSource, CouponType, CouponStatus
+from .models import TransactionType, DividendType, DividendSource, AssetClass, PriceSource, CouponType, CouponStatus
 
 # Alias to the date type. Some models have a field literally named `date`; an
 # annotated assignment like `date: Optional[date] = None` rebinds `date` to the
@@ -223,6 +223,7 @@ class DividendOut(BaseModel):
     currency: str
     fx_rate: float
     type: DividendType
+    source: DividendSource = DividendSource.IMPORT
     minus_compensation: bool = False
 
     @computed_field
@@ -239,6 +240,21 @@ class DividendOut(BaseModel):
         return round(self.tax_amount / base, 4) if base > 0 else 0.0
 
     model_config = {"from_attributes": True}
+
+
+class DividendDuplicate(BaseModel):
+    """Un incasso YAHOO coperto da un import reale (candidato alla deduplica)."""
+    id: int
+    portfolio_id: int
+    date: date
+    instrument_name: str
+    net_eur: float               # netto convertito in EUR (solo display)
+    covered_by_date: date        # data dell'import broker/manuale che lo copre
+
+
+class DeduplicateResult(BaseModel):
+    deleted: int
+    removed: List[DividendDuplicate]
 
 
 # ── Coupon schedule (certificati) ─────────────────────────────────────────────
@@ -461,6 +477,16 @@ class ParsedTransaction(BaseModel):
     currency: str
     duplicate: bool = False
     is_dividend: bool = False
+    # Ritenuta estera reale quando il file la fornisce (es. Fineco "Movimenti
+    # conto", Trade Republic). Sui dividendi: price=LORDO, foreign_tax=ritenuta
+    # estera, fees=imposta italiana. Default 0 → comportamento invariato.
+    foreign_tax: float = 0.0
+    # Avviso non bloccante mostrato in anteprima (es. vendita senza acquisto
+    # corrispondente → posizione negativa). None = nessun problema.
+    warning: Optional[str] = None
+    # Ritenuta estera già trattenuta alla fonte (quando il file la riporta, es.
+    # "Movimenti conto" Fineco). 0.0 per i parser che non la distinguono.
+    foreign_tax: float = 0.0
 
 class ImportPreview(BaseModel):
     rows: List[ParsedTransaction]

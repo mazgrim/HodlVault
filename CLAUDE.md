@@ -67,6 +67,10 @@ docker run --rm -v hodlvault_hodlvault_data:/data -v $(pwd):/backup alpine \
 
 In dev, Vite proxies `/api/*` → `http://backend:8000` (`vite.config.ts`). In production, nginx (frontend container) does the same proxy. The React axios client (`src/api/client.ts`) always uses the relative base URL `/api`, so the proxy is transparent.
 
+### Import CSV/Excel (`routers/import_data.py`, `services/parsers/`)
+
+Un parser per broker (`fineco`, `directa`, `trade_republic`). Il `FinecoParser` riconosce **due export diversi**: "Movimenti Dossier Titoli" (con ISIN → compravendite + dividendi) e "Movimenti conto"/lista movimenti (senza ISIN → **solo dividendi**, con ritenuta estera reale accoppiata e storni annullati; il titolo è identificato per **nome**, `ParsedTransaction.foreign_tax` porta la ritenuta). In `import_confirm` i dividendi senza ISIN/ticker vengono agganciati per nome **solo agli strumenti già presenti nel portafoglio** (`_match_instrument_by_name`); se non c'è match la riga è saltata (mai creato uno strumento da un nome nudo). Bolli e altre imposte del conto non sono importabili (nessun modello dedicato).
+
 ### Backend structure
 
 ```

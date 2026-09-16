@@ -77,6 +77,7 @@ def create_dividend(
         currency=payload.currency,
         fx_rate=payload.fx_rate,
         type=payload.type,
+        source=models.DividendSource.MANUAL,
     )
     db.add(ev)
     db.commit()
@@ -99,6 +100,52 @@ async def sync_dividends(
     calc = DividendCalculator(db, current_user.id)
     created = await calc.sync_from_market(portfolio_id)
     return {"created": created}
+
+
+def _duplicate_dto(ev: models.DividendEvent, covered_by, db: Session) -> schemas.DividendDuplicate:
+    inst = db.query(models.Instrument).filter(models.Instrument.id == ev.instrument_id).first()
+    return schemas.DividendDuplicate(
+        id=ev.id,
+        portfolio_id=ev.portfolio_id,
+        date=ev.date,
+        instrument_name=(inst.name if inst and inst.name else (inst.ticker if inst else "?")),
+        net_eur=round(ev.amount / (ev.fx_rate or 1.0), 4),
+        covered_by_date=covered_by,
+    )
+
+
+@router.get("/duplicates", response_model=List[schemas.DividendDuplicate])
+def list_duplicate_dividends(
+    portfolio_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Anteprima: incassi Yahoo che un import reale già copre (candidati alla
+    deduplica). Sola lettura — non cancella nulla."""
+    if portfolio_id is not None and portfolio_id not in _user_portfolio_ids(current_user.id, db):
+        raise HTTPException(status_code=403, detail="Accesso negato")
+    calc = DividendCalculator(db, current_user.id)
+    return [_duplicate_dto(ev, cov, db) for ev, cov in calc.find_yahoo_duplicates(portfolio_id)]
+
+
+@router.post("/deduplicate", response_model=schemas.DeduplicateResult)
+def deduplicate_dividends(
+    portfolio_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_write),
+):
+    """Rimuove gli incassi Yahoo coperti da un import reale ("broker vince").
+    Ricalcola i candidati al momento (idempotente): cancella solo righe YAHOO,
+    mai gli import. Ritorna la lista di ciò che è stato rimosso."""
+    if portfolio_id is not None and portfolio_id not in _user_portfolio_ids(current_user.id, db):
+        raise HTTPException(status_code=403, detail="Accesso negato")
+    calc = DividendCalculator(db, current_user.id)
+    dupes = calc.find_yahoo_duplicates(portfolio_id)
+    removed = [_duplicate_dto(ev, cov, db) for ev, cov in dupes]
+    for ev, _ in dupes:
+        db.delete(ev)
+    db.commit()
+    return schemas.DeduplicateResult(deleted=len(removed), removed=removed)
 
 
 @router.patch("/{div_id}/minus-compensation", response_model=schemas.DividendOut)

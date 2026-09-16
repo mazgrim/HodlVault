@@ -1,29 +1,38 @@
 """
-Fineco "Movimenti Dossier Titoli" parser — supports both XLS export variants.
+Fineco parser — riconosce automaticamente due export diversi.
 
-Two report layouts are handled automatically:
+1) "Movimenti Dossier Titoli" (ha ISIN) — compravendite E dividendi.
+   Due varianti di colonne:
 
-  Variant A (11 columns, no commissions):
-    Operazione | Data valuta | Descrizione | Titolo | ISIN | Segno
-    Quantita | Divisa | Prezzo | Cambio | Controvalore
+   Variant A (11 columns, no commissions):
+     Operazione | Data valuta | Descrizione | Titolo | ISIN | Segno
+     Quantita | Divisa | Prezzo | Cambio | Controvalore
 
-  Variant B (15 columns, with commissions):
-    …same 11… | Commissioni Fondi Sw/Ingr/Uscita
-               | Commissioni Fondi Banca Corrispondente
-               | Spese Fondi Sgr
-               | Commissioni amministrato
+   Variant B (15 columns, with commissions):
+     …same 11… | Commissioni Fondi Sw/Ingr/Uscita
+                | Commissioni Fondi Banca Corrispondente
+                | Spese Fondi Sgr
+                | Commissioni amministrato
 
-Both compravendita (buy/sell) and dividendo rows are parsed.
+   Both compravendita (buy/sell) and dividendo rows are parsed.
+   Prices are normalised to EUR:
+     price_eur = Controvalore / Quantita   (uses the settled EUR amount)
+     fx_rate   = 1.0 ; currency = EUR
+   This avoids any ambiguity about which currency "Divisa" refers to in each
+   variant while keeping the calculation (avg cost, P&L) accurate.
 
-Prices are normalised to EUR:
-  price_eur = Controvalore / Quantita   (uses the settled EUR amount)
-  fx_rate   = 1.0
-  currency  = EUR
-
-This avoids any ambiguity about which currency "Divisa" refers to in each variant
-while keeping the calculation (avg cost, P&L) accurate.
+2) "Movimenti conto" / lista movimenti (NIENTE ISIN) — SOLO dividendi.
+   Colonne: Data_Operazione | Data_Valuta | Entrate | Uscite | Descrizione
+            | Descrizione_Completa | Stato
+   Si accoppia ogni "Dividendo estero" (netto in Entrate) con la sua "Ritenuta
+   dividendo estero" (in Uscite) su stessa data+titolo → lordo = netto+ritenuta,
+   foreign_tax = ritenuta. Le righe "Storno …" annullano il movimento originale.
+   Titolo identificato solo per NOME (da Descrizione_Completa): il match dello
+   strumento avviene a valle nell'import router, ristretto ai titoli già in
+   portafoglio. Compravendite, bolli e altre imposte NON vengono importati qui.
 """
 import io
+import re
 from datetime import datetime
 from typing import List
 
@@ -44,6 +53,45 @@ _FEE_COLS = (
     "Spese Fondi Sgr",
     "Commissioni amministrato",
 )
+
+# "Descrizione_Completa" del report "Movimenti conto" (esempio fittizio):
+#   "Div.su 10,000 ACME"            → dividendo (netto in colonna Entrate)
+#   "Rit.div.su 10,000 ACME"        → ritenuta estera (in colonna Uscite)
+#   "Storno Div.su 10,000 ACME"     → storno che annulla il movimento originale
+_MOV_DESC_RE = re.compile(
+    r"^(?P<storno>storno\s+)?(?:div\.su|rit\.div\.su)\s+"
+    r"(?P<qty>[\d.,]+)\s+(?P<name>.+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _apply_storni(entries: list) -> list:
+    """Cancel each "Storno …" row against one matching original (same date, title
+    and amount to the cent). Returns the surviving real movements, storni removed."""
+    normals = [e for e in entries if not e["storno"]]
+    storni = [e for e in entries if e["storno"]]
+    for s in storni:
+        key = (s["date"], s["key_name"], round(s["amount"], 2))
+        for i, n in enumerate(normals):
+            if (n["date"], n["key_name"], round(n["amount"], 2)) == key:
+                normals.pop(i)
+                break
+    return normals
+
+
+def _detect_layout(vals) -> str | None:
+    """Classify a candidate header row.
+
+    - "dossier"   → "Movimenti Dossier Titoli" (compravendite + dividendi, con ISIN)
+    - "movements" → "Movimenti conto" / lista movimenti (solo cassa: dividendi,
+      ritenute, bolli… senza ISIN né quantità in colonna)
+    """
+    s = {str(v).strip() for v in vals}
+    if "Operazione" in s or "ISIN" in s:
+        return "dossier"
+    if "Descrizione" in s and ("Entrate" in s or "Uscite" in s):
+        return "movements"
+    return None
 
 
 def _parse_float(s: str) -> float:
@@ -83,8 +131,8 @@ class FinecoParser:
         wb = _xlrd.open_workbook(file_contents=content)
         ws = wb.sheet_by_index(0)
 
-        # Locate the header row (contains "Operazione" or "ISIN")
-        header_idx = self._find_header_row_xls(ws)
+        # Locate the header row and classify the report layout
+        header_idx, layout = self._find_header_row_xls(ws)
         if header_idx is None:
             return []
 
@@ -102,14 +150,15 @@ class FinecoParser:
                     d[h] = str(raw).strip()
             rows.append(d)
 
-        return self._parse_rows(rows)
+        return self._dispatch(layout, rows)
 
-    def _find_header_row_xls(self, ws) -> int | None:
+    def _find_header_row_xls(self, ws):
         for r in range(min(15, ws.nrows)):
             vals = [str(ws.cell_value(r, c)).strip() for c in range(ws.ncols)]
-            if "Operazione" in vals or "ISIN" in vals:
-                return r
-        return None
+            layout = _detect_layout(vals)
+            if layout:
+                return r, layout
+        return None, None
 
     # ── XLSX ─────────────────────────────────────────────────────────────────
 
@@ -120,9 +169,11 @@ class FinecoParser:
         all_rows = list(ws.iter_rows(values_only=True))
 
         header_idx = None
+        layout = None
         for i, row in enumerate(all_rows):
             vals = [str(c).strip() if c is not None else '' for c in row]
-            if "Operazione" in vals or "ISIN" in vals:
+            layout = _detect_layout(vals)
+            if layout:
                 header_idx = i
                 break
         if header_idx is None:
@@ -133,7 +184,7 @@ class FinecoParser:
             {h: (str(v).strip() if v is not None else '') for h, v in zip(headers, row)}
             for row in all_rows[header_idx + 1:]
         ]
-        return self._parse_rows(rows)
+        return self._dispatch(layout, rows)
 
     # ── CSV (text fallback) ───────────────────────────────────────────────────
 
@@ -148,8 +199,10 @@ class FinecoParser:
                 continue
 
             header_idx = None
+            layout = None
             for i, row in enumerate(all_rows):
-                if "Operazione" in row or "ISIN" in row:
+                layout = _detect_layout(row)
+                if layout:
                     header_idx = i
                     break
             if header_idx is None:
@@ -160,8 +213,114 @@ class FinecoParser:
                 {h: v.strip() for h, v in zip(headers, row)}
                 for row in all_rows[header_idx + 1:]
             ]
-            return self._parse_rows(dicts)
+            return self._dispatch(layout, dicts)
         return []
+
+    # ── Dispatch ──────────────────────────────────────────────────────────────
+
+    def _dispatch(self, layout: str | None, rows: list) -> List[ParsedTransaction]:
+        if layout == "movements":
+            return self._parse_movements_rows(rows)
+        return self._parse_rows(rows)
+
+    # ── "Movimenti conto" (cash statement) ────────────────────────────────────
+    #
+    # Only dividends are imported here (per product decision): a "Dividendo estero"
+    # credit paired with its "Ritenuta dividendo estero" debit on the same date and
+    # security. Compravendite, bolli e altre imposte NON hanno ISIN/quantità/prezzo
+    # utili e non vengono importate da questo layout.
+
+    def _parse_movements_rows(self, rows: list) -> List[ParsedTransaction]:
+        dividends: list[dict] = []   # {date, name, key_name, qty, amount, storno}
+        withholdings: list[dict] = []
+
+        for row in rows:
+            if not any(v for v in row.values()):
+                continue
+            entry = self._parse_movement_entry(row)
+            if entry is None:
+                continue
+            (withholdings if entry["kind"] == "ritenuta" else dividends).append(entry)
+
+        # Storni: ogni riga "Storno …" annulla un movimento originale identico
+        # (stessa data, titolo e importo). Ciò che resta sono gli eventi reali.
+        real_div = _apply_storni(dividends)
+        real_wht = _apply_storni(withholdings)
+
+        # Accoppia ogni dividendo con la ritenuta su stessa data + titolo.
+        wht_by_key: dict = {}
+        for w in real_wht:
+            wht_by_key.setdefault((w["date"], w["key_name"]), []).append(w["amount"])
+
+        result: List[ParsedTransaction] = []
+        for d in real_div:
+            k = (d["date"], d["key_name"])
+            foreign_tax = 0.0
+            bucket = wht_by_key.get(k)
+            if bucket:
+                foreign_tax = round(bucket.pop(0), 4)   # una ritenuta per dividendo
+            net = round(d["amount"], 4)
+            gross = round(net + foreign_tax, 4)
+            if gross <= 0:
+                continue
+            result.append(ParsedTransaction(
+                date=d["date"],
+                type=TransactionType.BUY,   # ignorato per i dividendi
+                ticker=None,
+                isin=None,
+                name=d["name"],
+                quantity=d["qty"],
+                price=gross,                # LORDO
+                fees=0.0,                   # imposta italiana non presente nel file
+                foreign_tax=foreign_tax,    # ritenuta estera reale
+                currency="EUR",
+                is_dividend=True,
+            ))
+        return result
+
+    def _parse_movement_entry(self, row: dict) -> dict | None:
+        desc = (row.get("Descrizione", "") or "").replace("\n", " ").strip().lower()
+        is_ritenuta = "ritenuta" in desc and "dividend" in desc
+        is_dividend = ("dividendo" in desc) and not is_ritenuta
+        if not is_ritenuta and not is_dividend:
+            return None
+
+        m = _MOV_DESC_RE.match((row.get("Descrizione_Completa", "") or "").strip())
+        if not m:
+            return None
+        name = m.group("name").strip()
+        if not name:
+            return None
+        qty = _parse_float(m.group("qty"))
+
+        date_str = (row.get("Data_Operazione", "") or "").strip()
+        # Excel/openpyxl può restituire "2026-07-01 00:00:00"
+        date_str = date_str.split(" ")[0]
+        tx_date = None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                tx_date = datetime.strptime(date_str, fmt).date()
+                break
+            except ValueError:
+                continue
+        if not tx_date:
+            return None
+
+        # Importo: il netto sta in Entrate (dividendo) o in Uscite (ritenuta).
+        raw_amount = row.get("Entrate", "") or row.get("Uscite", "") or "0"
+        amount = abs(_parse_float(raw_amount))
+        if amount <= 0:
+            return None
+
+        return {
+            "kind": "ritenuta" if is_ritenuta else "dividendo",
+            "date": tx_date,
+            "name": name,
+            "key_name": name.upper(),
+            "qty": qty,
+            "amount": amount,
+            "storno": bool(m.group("storno")),
+        }
 
     # ── Core row processing ───────────────────────────────────────────────────
 

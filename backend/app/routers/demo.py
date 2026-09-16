@@ -371,6 +371,7 @@ def _seed(db: Session, user: models.User) -> None:
                 date=div_date, amount=amount,
                 currency=currency, fx_rate=fx_rate,
                 type=models.DividendType(div_type),
+                source=models.DividendSource.IMPORT,
             ))
 
     db.commit()

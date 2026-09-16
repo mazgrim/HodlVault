@@ -481,6 +481,9 @@ class ParsedTransaction(BaseModel):
     # conto", Trade Republic). Sui dividendi: price=LORDO, foreign_tax=ritenuta
     # estera, fees=imposta italiana. Default 0 → comportamento invariato.
     foreign_tax: float = 0.0
+    # Avviso non bloccante mostrato in anteprima (es. vendita senza acquisto
+    # corrispondente → posizione negativa). None = nessun problema.
+    warning: Optional[str] = None
     # Ritenuta estera già trattenuta alla fonte (quando il file la riporta, es.
     # "Movimenti conto" Fineco). 0.0 per i parser che non la distinguono.
     foreign_tax: float = 0.0

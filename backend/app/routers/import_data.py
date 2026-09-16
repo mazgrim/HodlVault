@@ -60,6 +60,55 @@ def _match_instrument_by_name(portfolio_id: int, name: str, db: Session):
     return prefix[0] if len(prefix) == 1 else None
 
 
+def _annotate_position_warnings(rows: list, portfolio_id: int, db: Session) -> None:
+    """Segnala le VENDITE che porterebbero la posizione in negativo — tipicamente
+    un file che contiene il SELL ma non il BUY corrispondente (che magari non è
+    stato importato). Considera la posizione già presente nel portafoglio più i
+    BUY presenti nell'import stesso, in ordine cronologico. Avviso non bloccante."""
+    trades = [r for r in rows if not r.is_dividend]
+    if not trades:
+        return
+
+    def _key(r) -> str:
+        if r.isin:
+            return "I:" + r.isin.upper()
+        if r.ticker:
+            return "T:" + r.ticker.upper()
+        return "N:" + (r.name or "").upper()
+
+    # Posizione di partenza per ogni strumento: dalle transazioni già registrate.
+    start: dict = {}
+    for r in trades:
+        k = _key(r)
+        if k in start:
+            continue
+        inst = None
+        if r.isin:
+            inst = db.query(models.Instrument).filter(models.Instrument.isin == r.isin).first()
+        if not inst and r.ticker:
+            inst = db.query(models.Instrument).filter(models.Instrument.ticker == r.ticker).first()
+        pos = 0.0
+        if inst:
+            for t in db.query(models.Transaction).filter(
+                models.Transaction.portfolio_id == portfolio_id,
+                models.Transaction.instrument_id == inst.id,
+            ).all():
+                pos += t.quantity if t.type == models.TransactionType.BUY else -t.quantity
+        start[k] = pos
+
+    # Applica in ordine cronologico i movimenti dell'import; una vendita che porta
+    # sotto zero non ha un acquisto a copertura.
+    running = dict(start)
+    for r in sorted(trades, key=lambda x: x.date):
+        k = _key(r)
+        if r.type == models.TransactionType.BUY:
+            running[k] = running.get(k, 0.0) + r.quantity
+        else:
+            running[k] = running.get(k, 0.0) - r.quantity
+            if running[k] < -1e-6:
+                r.warning = "Vendita senza acquisto corrispondente: la posizione diventerebbe negativa. Manca il BUY nel file?"
+
+
 def _check_portfolio(portfolio_id: int, user_id: int, db: Session):
     p = db.query(models.Portfolio).filter(
         models.Portfolio.id == portfolio_id,
@@ -129,6 +178,9 @@ async def import_preview(
             row.duplicate = _is_dividend_duplicate(portfolio_id, row, db)
         else:
             row.duplicate = _is_duplicate(portfolio_id, row, db)
+
+    # Segnala le vendite senza acquisto a copertura (posizione negativa).
+    _annotate_position_warnings(rows, portfolio_id, db)
 
     return schemas.ImportPreview(
         rows=rows,

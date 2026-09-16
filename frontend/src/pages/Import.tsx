@@ -17,6 +17,7 @@ interface ParsedRow {
   currency: string
   duplicate: boolean
   is_dividend: boolean
+  warning: string | null
 }
 
 interface Preview { total: number; duplicates: number }
@@ -333,6 +334,22 @@ export default function Import() {
                 )
               })()}
 
+              {/* Avviso vendite senza acquisto */}
+              {(() => {
+                const warned = rows.filter(r => r.warning)
+                if (!warned.length) return null
+                return (
+                  <div className="flex items-start gap-2 text-amber-400 text-xs bg-amber-900/20 border border-amber-700/30 rounded-lg px-3 py-2">
+                    <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                    <span>
+                      <strong>{warned.length} vendit{warned.length === 1 ? 'a' : 'e'} senza acquisto corrispondente</strong> —
+                      la posizione risulterebbe negativa. Probabilmente manca il BUY nel file (importalo, oppure verifica
+                      che l'acquisto sia già stato caricato). Puoi comunque procedere: le righe interessate sono evidenziate.
+                    </span>
+                  </div>
+                )
+              })()}
+
               {preview.duplicates > 0 && (
                 <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
                   <input type="checkbox" checked={includeDuplicates} onChange={(e) => setIncludeDuplicates(e.target.checked)} className="w-4 h-4 accent-gold-500" />
@@ -353,7 +370,7 @@ export default function Import() {
                     {rows.map((row, i) => {
                       const dim = row.duplicate && !includeDuplicates
                       return (
-                        <tr key={i} className={`border-b border-gray-700/20 ${dim ? 'opacity-40' : ''}`}>
+                        <tr key={i} className={`border-b border-gray-700/20 ${dim ? 'opacity-40' : ''} ${row.warning ? 'bg-amber-900/10' : ''}`}>
                           <td className="py-2 pl-3 pr-1 whitespace-nowrap">
                             {row.duplicate
                               ? <span className="badge bg-amber-900/40 text-amber-400 border border-amber-700/30">DUP</span>
@@ -361,7 +378,16 @@ export default function Import() {
                             }
                           </td>
                           <td className="py-2 px-3 text-gray-300 whitespace-nowrap">{fmtDate(row.date)}</td>
-                          <td className="py-2 px-3">{typeBadge(row)}</td>
+                          <td className="py-2 px-3">
+                            <div className="flex items-center gap-1.5">
+                              {typeBadge(row)}
+                              {row.warning && (
+                                <span title={row.warning} className="text-amber-400 flex-shrink-0 inline-flex">
+                                  <AlertCircle size={14} />
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="py-2 px-3 text-gray-500 font-mono">{row.isin || '—'}</td>
                           <td className="py-2 px-2 min-w-[110px]">
                             <TickerSearchInput

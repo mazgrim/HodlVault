@@ -31,6 +31,7 @@ const ASSET_CLASSES = ['EQUITY', 'ETF', 'BOND', 'CRYPTO', 'COMMODITY', 'REAL_EST
 /** Modifica anagrafica e fonte prezzo di uno strumento esistente. */
 export default function InstrumentSettingsModal({ instrument, onClose, onSaved }: Props) {
   const [name, setName]             = useState(instrument.name)
+  const [ticker, setTicker]         = useState(instrument.ticker)
   const [assetClass, setAssetClass] = useState(instrument.asset_class)
   const [currency, setCurrency]     = useState(instrument.currency)
   const [source, setSource]         = useState<PriceSourceValue>({
@@ -48,10 +49,15 @@ export default function InstrumentSettingsModal({ instrument, onClose, onSaved }
       setError('Per la fonte JSON servono URL e JSONPath del prezzo.')
       return
     }
+    if (!ticker.trim()) {
+      setError('Il ticker è obbligatorio.')
+      return
+    }
     setSaving(true); setError('')
     try {
       await marketApi.updateInstrument(instrument.id, {
         name: name.trim(),
+        ticker: ticker.trim().toUpperCase(),
         asset_class: assetClass,
         currency: currency.trim().toUpperCase() || 'EUR',
         price_source: source.price_source,
@@ -85,6 +91,22 @@ export default function InstrumentSettingsModal({ instrument, onClose, onSaved }
           <div>
             <label className="label">Nome</label>
             <input className="input" value={name} onChange={e => setName(e.target.value)} required />
+          </div>
+
+          <div>
+            <label className="label">Ticker</label>
+            <input
+              className="input uppercase font-mono"
+              value={ticker}
+              onChange={e => setTicker(e.target.value)}
+              required
+            />
+            {ticker.trim().toUpperCase() !== instrument.ticker && (
+              <p className="text-[11px] text-amber-400/90 mt-1">
+                Cambiando il ticker cambia il simbolo Yahoo da cui arrivano i prezzi. Dopo il salvataggio ricarica lo storico
+                ("Carica storico" nella sidebar): i prezzi già scaricati restano quelli del vecchio ticker.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

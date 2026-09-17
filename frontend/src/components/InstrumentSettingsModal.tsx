@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { marketApi } from '../api'
 import PriceSourceConfig, { type PriceSourceValue } from './PriceSourceConfig'
+import TickerSearchInput from './TickerSearchInput'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -95,11 +96,11 @@ export default function InstrumentSettingsModal({ instrument, onClose, onSaved }
 
           <div>
             <label className="label">Ticker</label>
-            <input
-              className="input uppercase font-mono"
+            <TickerSearchInput
               value={ticker}
-              onChange={e => setTicker(e.target.value)}
-              required
+              onChange={setTicker}
+              placeholder="Cerca ticker o nome…"
+              inputClassName="input uppercase font-mono w-full"
             />
             {ticker.trim().toUpperCase() !== instrument.ticker && (
               <p className="text-[11px] text-amber-400/90 mt-1">

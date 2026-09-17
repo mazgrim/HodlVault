@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { X } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { X, AlertTriangle } from 'lucide-react'
 import { marketApi } from '../api'
 import PriceSourceConfig, { type PriceSourceValue } from './PriceSourceConfig'
 import TickerSearchInput from './TickerSearchInput'
@@ -43,6 +43,30 @@ export default function InstrumentSettingsModal({ instrument, onClose, onSaved }
   })
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
+
+  // Valuta rilevata da Yahoo per il ticker corrente. Se diversa da quella
+  // impostata, avvisiamo (la quotazione — es. .SG Stoccarda in EUR — determina la
+  // valuta; un ISIN riusato o un ticker cambiato possono averla lasciata sbagliata).
+  const [detectedCcy, setDetectedCcy] = useState<string | null>(null)
+  const ccyDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Controlla la valuta del ticker (all'apertura e a ogni modifica del ticker).
+  useEffect(() => {
+    const tk = ticker.trim()
+    if (ccyDebounce.current) clearTimeout(ccyDebounce.current)
+    if (!tk || (source.price_source !== 'YAHOO')) { setDetectedCcy(null); return }
+    ccyDebounce.current = setTimeout(async () => {
+      try {
+        const res = await marketApi.lookupInstrument({ ticker: tk })
+        setDetectedCcy((res.data?.currency || '').toUpperCase() || null)
+      } catch {
+        setDetectedCcy(null)  // ticker non trovato: nessun avviso
+      }
+    }, 400)
+    return () => { if (ccyDebounce.current) clearTimeout(ccyDebounce.current) }
+  }, [ticker, source.price_source])
+
+  const ccyMismatch = detectedCcy && detectedCcy !== currency.trim().toUpperCase()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -122,6 +146,24 @@ export default function InstrumentSettingsModal({ instrument, onClose, onSaved }
               <input className="input uppercase" value={currency} onChange={e => setCurrency(e.target.value)} />
             </div>
           </div>
+
+          {ccyMismatch && (
+            <div className="flex items-start gap-2 text-xs bg-amber-900/20 border border-amber-700/30 rounded-lg px-3 py-2">
+              <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="text-amber-300/90">
+                <strong>{ticker.trim().toUpperCase()}</strong> è quotato in <strong>{detectedCcy}</strong> su Yahoo, ma la valuta
+                impostata è <strong>{currency.trim().toUpperCase() || '—'}</strong>. Con la valuta sbagliata il prezzo viene
+                convertito due volte e risulta errato.
+                <button
+                  type="button"
+                  onClick={() => setCurrency(detectedCcy!)}
+                  className="ml-1 underline font-semibold text-amber-200 hover:text-amber-100"
+                >
+                  Imposta valuta a {detectedCcy}
+                </button>
+              </div>
+            </div>
+          )}
 
           <PriceSourceConfig
             value={source}

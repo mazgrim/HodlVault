@@ -529,20 +529,23 @@ class MarketService:
         ticker: Optional[str] = None,
         name: Optional[str] = None,
     ) -> Optional[Instrument]:
-        # 1. Try existing by ISIN
-        if isin:
-            inst = self.db.query(Instrument).filter(Instrument.isin == isin).first()
-            if inst:
-                # If caller supplies a different ticker the user explicitly corrected it → update
-                if ticker and ticker.strip() and ticker.strip() != inst.ticker:
-                    logger.info(f"Updating ticker for ISIN {isin}: {inst.ticker!r} → {ticker.strip()!r}")
-                    inst.ticker = ticker.strip()
-                    self.db.commit()
-                    self.db.refresh(inst)
-                return inst
-        # 2. Try existing by ticker
+        # L'identità dello strumento è il TICKER (una quotazione = un ticker).
+        # Lo stesso ISIN può avere più quotazioni (es. MSTR/USD e MIGA.SG/EUR):
+        # non vengono mai fuse e non si sovrascrive MAI il ticker di uno strumento
+        # esistente.
+        ticker = ticker.strip() if ticker else None
+
+        # 1. Se è dato il ticker, quello è l'identità: riusa SOLO se esiste già
+        #    con quel ticker, altrimenti crea uno strumento nuovo (anche se l'ISIN
+        #    esiste già sotto un altro ticker → quotazione distinta, tenuta separata).
         if ticker:
             inst = self.db.query(Instrument).filter(Instrument.ticker == ticker).first()
+            if inst:
+                return inst
+        # 2. Nessun ticker fornito: best-effort, riusa una qualsiasi quotazione con
+        #    questo ISIN.
+        elif isin:
+            inst = self.db.query(Instrument).filter(Instrument.isin == isin).first()
             if inst:
                 return inst
         # 3. Try Yahoo Finance

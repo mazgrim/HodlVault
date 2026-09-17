@@ -94,7 +94,10 @@ class Instrument(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     ticker = Column(String(32), nullable=False, index=True)
-    isin = Column(String(16), unique=True, nullable=True, index=True)
+    # NON unico: lo stesso ISIN può avere più quotazioni (ticker/exchange diversi,
+    # es. MSTR su Nasdaq in USD e MIGA.SG su Stoccarda in EUR). L'identità dello
+    # strumento è il TICKER; l'ISIN è informativo/condivisibile.
+    isin = Column(String(16), nullable=True, index=True)
     name = Column(String(256), nullable=False)
     asset_class = Column(Enum(AssetClass), default=AssetClass.EQUITY)
     currency = Column(String(8), default="USD")

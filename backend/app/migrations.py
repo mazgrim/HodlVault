@@ -28,7 +28,7 @@ from sqlalchemy.engine import Engine
 logger = logging.getLogger(__name__)
 
 # Alza questo numero quando aggiungi una migrazione in MIGRATIONS.
-TARGET_VERSION = 5
+TARGET_VERSION = 6
 
 
 # ── Migrazioni ────────────────────────────────────────────────────────────────
@@ -142,6 +142,19 @@ def _migration_5_dividend_unique_index(cur):
     )
 
 
+def _migration_6_isin_not_unique(cur):
+    """
+    Consente più quotazioni con lo stesso ISIN (ticker/exchange diversi: es. MSTR
+    su Nasdaq in USD e MIGA.SG su Stoccarda in EUR). L'ISIN era UNIQUE, quindi il
+    secondo import con lo stesso ISIN riusava lo strumento esistente e ne
+    sovrascriveva il ticker, fondendo due posizioni distinte. Qui l'indice UNIQUE
+    su `isin` diventa un indice normale; l'identità dello strumento passa al
+    TICKER (gestita in get_or_create_instrument). Idempotente.
+    """
+    cur.execute("DROP INDEX IF EXISTS ix_instruments_isin")
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_instruments_isin ON instruments (isin)")
+
+
 # Mappa versione → funzione. Le chiavi devono essere consecutive a partire da 1.
 MIGRATIONS = {
     1: _migration_1_baseline,
@@ -149,6 +162,7 @@ MIGRATIONS = {
     3: _migration_3_minus_compensation,
     4: _migration_4_dividend_source,
     5: _migration_5_dividend_unique_index,
+    6: _migration_6_isin_not_unique,
 }
 
 

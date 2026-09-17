@@ -227,12 +227,15 @@ async def import_confirm(
                 no_ticker += 1
                 continue
 
-            # Check if instrument existed before this import
-            existing = None
-            if row.isin:
-                existing = db.query(models.Instrument).filter(models.Instrument.isin == row.isin).first()
-            if not existing and row.ticker:
+            # Esisteva già? Il ticker è l'identità: con un ticker nuovo get_or_create
+            # crea uno strumento nuovo anche se l'ISIN esiste sotto un altro ticker,
+            # quindi qui si guarda il ticker (l'ISIN solo se il ticker manca).
+            if row.ticker:
                 existing = db.query(models.Instrument).filter(models.Instrument.ticker == row.ticker).first()
+            elif row.isin:
+                existing = db.query(models.Instrument).filter(models.Instrument.isin == row.isin).first()
+            else:
+                existing = None
             is_new = existing is None
 
             instrument = await svc.get_or_create_instrument(
@@ -332,6 +335,18 @@ async def _fetch_history_for_instruments(instrument_ids: list):
         db.close()
 
 
+def _resolve_row_instrument(row: schemas.ParsedTransaction, db: Session):
+    """Strumento a cui la riga si riferisce. Il TICKER è l'identità (stesso ISIN
+    può avere più quotazioni); l'ISIN è ripiego solo se il ticker non è impostato."""
+    if row.ticker:
+        inst = db.query(models.Instrument).filter(models.Instrument.ticker == row.ticker).first()
+        if inst:
+            return inst
+    if row.isin:
+        return db.query(models.Instrument).filter(models.Instrument.isin == row.isin).first()
+    return None
+
+
 def _is_duplicate(portfolio_id: int, row: schemas.ParsedTransaction, db: Session) -> bool:
     q = db.query(models.Transaction).filter(
         models.Transaction.portfolio_id == portfolio_id,
@@ -339,21 +354,16 @@ def _is_duplicate(portfolio_id: int, row: schemas.ParsedTransaction, db: Session
         models.Transaction.quantity == row.quantity,
         models.Transaction.price == row.price,
     )
-    if row.isin:
-        inst = db.query(models.Instrument).filter(models.Instrument.isin == row.isin).first()
-        if inst:
-            q = q.filter(models.Transaction.instrument_id == inst.id)
+    inst = _resolve_row_instrument(row, db)
+    if inst:
+        q = q.filter(models.Transaction.instrument_id == inst.id)
     return q.first() is not None
 
 
 def _is_dividend_duplicate(portfolio_id: int, row: schemas.ParsedTransaction, db: Session) -> bool:
     """A dividend is a duplicate if one already exists for the same portfolio,
     instrument and date (matches the uq_dividend_event constraint)."""
-    inst = None
-    if row.isin:
-        inst = db.query(models.Instrument).filter(models.Instrument.isin == row.isin).first()
-    if not inst and row.ticker:
-        inst = db.query(models.Instrument).filter(models.Instrument.ticker == row.ticker).first()
+    inst = _resolve_row_instrument(row, db)
     if not inst and not row.isin and not row.ticker:
         # Fineco "Movimenti conto": nessun ISIN/ticker → match per nome nel portafoglio
         inst = _match_instrument_by_name(portfolio_id, row.name, db)

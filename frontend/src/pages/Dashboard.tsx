@@ -486,17 +486,22 @@ export default function Dashboard() {
                           <td className={`py-3 pr-4 tabular-nums font-medium ${pnlClass(c.realized_pnl_net)}`}>
                             {pnlSign(c.realized_pnl_net)}{fmtEur(c.realized_pnl_net)}
                           </td>
-                          <td className="py-3 pr-4 tabular-nums text-gray-400">
-                            {c.current_value != null ? fmtEur(c.current_value) : '—'}
+                          <td className="py-3 pr-4 tabular-nums whitespace-nowrap">
+                            {c.current_price != null ? (
+                              <>
+                                <div className="text-gray-300">{fmtEur(c.current_price)}</div>
+                                <div className="text-xs text-gray-500">{c.current_value != null ? fmtEur(c.current_value) : ''}</div>
+                              </>
+                            ) : <span className="text-gray-400">—</span>}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                   <p className="text-[11px] text-gray-600 mt-3">
-                    Sotto ogni prezzo medio è indicato il controvalore totale (prezzo × quantità). "P&L netto" sottrae la stima
-                    dell'imposta sul capital gain (26% azioni/ETF, 12,5% bond white-list; nessuna imposta sulle minusvalenze, senza
-                    compensazione dello zainetto). "Valore Attuale" = prezzo di oggi × quantità venduta.
+                    Sotto ogni prezzo (medio o attuale) è indicato il controvalore totale (prezzo × quantità). "P&L netto" sottrae
+                    la stima dell'imposta sul capital gain (26% azioni/ETF, 12,5% bond white-list; nessuna imposta sulle
+                    minusvalenze, senza compensazione dello zainetto). "Valore Attuale" = prezzo di oggi × quantità venduta.
                   </p>
                 </div>
               )}

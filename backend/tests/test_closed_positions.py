@@ -36,8 +36,11 @@ def test_posizione_chiusa_calcoli(db, user, portfolio):
     assert r.quantity == 10
     assert r.avg_buy_price == 100.0
     assert r.avg_sell_price == 120.0
-    assert r.realized_pnl == 200.0          # (120-100)*10
+    assert r.buy_value == 1000.0            # 100 × 10
+    assert r.sell_value == 1200.0           # 120 × 10
+    assert r.realized_pnl == 200.0          # (120-100)*10, lordo
     assert r.realized_pnl_pct == 20.0       # 200 / 1000
+    assert r.realized_pnl_net == 148.0      # 200 − 26% = 148 (equity)
     assert r.current_price == 150.0
     assert r.current_value == 1500.0        # 150 * 10 (valore ipotetico oggi)
     assert r.first_buy_date == date(2024, 1, 1)
@@ -61,5 +64,6 @@ def test_perdita_realizzata(db, user, portfolio):
     rows = DashboardCalculator(db, user.id).closed_positions(portfolio.id)
     assert len(rows) == 1
     assert rows[0].realized_pnl == -250.0    # (150-200)*5
+    assert rows[0].realized_pnl_net == -250.0  # perdita: nessuna imposta
     assert rows[0].current_price is None     # nessun prezzo salvato
     assert rows[0].current_value is None

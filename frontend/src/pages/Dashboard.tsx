@@ -79,8 +79,11 @@ interface ClosedPosition {
   quantity: number
   avg_buy_price: number
   avg_sell_price: number
+  buy_value: number
+  sell_value: number
   realized_pnl: number
   realized_pnl_pct: number
+  realized_pnl_net: number
   current_price: number | null
   current_value: number | null
   first_buy_date: string | null
@@ -449,7 +452,7 @@ export default function Dashboard() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-700/50">
-                        {['Strumento', 'Qtà', 'Prezzo Acq.', 'Prezzo Vend.', 'P&L €', 'P&L %', 'Valore Attuale'].map((h) => (
+                        {['Strumento', 'Qtà', 'Acquisto', 'Vendita', 'P&L lordo', 'P&L netto', 'Valore Attuale'].map((h) => (
                           <th key={h} className="text-left py-2 pr-4 text-xs font-medium text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             {h}
                           </th>
@@ -468,13 +471,20 @@ export default function Dashboard() {
                             </Link>
                           </td>
                           <td className="py-3 pr-4 tabular-nums text-gray-300">{fmtNum(c.quantity, 4)}</td>
-                          <td className="py-3 pr-4 tabular-nums text-gray-300">{fmtEur(c.avg_buy_price)}</td>
-                          <td className="py-3 pr-4 tabular-nums text-gray-300">{fmtEur(c.avg_sell_price)}</td>
-                          <td className={`py-3 pr-4 tabular-nums font-medium ${pnlClass(c.realized_pnl)}`}>
-                            {pnlSign(c.realized_pnl)}{fmtEur(c.realized_pnl)}
+                          <td className="py-3 pr-4 tabular-nums whitespace-nowrap">
+                            <div className="text-gray-300">{fmtEur(c.avg_buy_price)}</div>
+                            <div className="text-xs text-gray-500">{fmtEur(c.buy_value)}</div>
                           </td>
-                          <td className={`py-3 pr-4 tabular-nums font-medium ${pnlClass(c.realized_pnl_pct)}`}>
-                            {pnlSign(c.realized_pnl_pct)}{fmtPct(c.realized_pnl_pct)}
+                          <td className="py-3 pr-4 tabular-nums whitespace-nowrap">
+                            <div className="text-gray-300">{fmtEur(c.avg_sell_price)}</div>
+                            <div className="text-xs text-gray-500">{fmtEur(c.sell_value)}</div>
+                          </td>
+                          <td className={`py-3 pr-4 tabular-nums font-medium whitespace-nowrap ${pnlClass(c.realized_pnl)}`}>
+                            <div>{pnlSign(c.realized_pnl)}{fmtEur(c.realized_pnl)}</div>
+                            <div className="text-xs font-normal opacity-80">{pnlSign(c.realized_pnl_pct)}{fmtPct(c.realized_pnl_pct)}</div>
+                          </td>
+                          <td className={`py-3 pr-4 tabular-nums font-medium ${pnlClass(c.realized_pnl_net)}`}>
+                            {pnlSign(c.realized_pnl_net)}{fmtEur(c.realized_pnl_net)}
                           </td>
                           <td className="py-3 pr-4 tabular-nums text-gray-400">
                             {c.current_value != null ? fmtEur(c.current_value) : '—'}
@@ -484,7 +494,9 @@ export default function Dashboard() {
                     </tbody>
                   </table>
                   <p className="text-[11px] text-gray-600 mt-3">
-                    "Valore Attuale" = prezzo di oggi × quantità venduta: quanto varrebbe la posizione se non l'avessi chiusa.
+                    Sotto ogni prezzo medio è indicato il controvalore totale (prezzo × quantità). "P&L netto" sottrae la stima
+                    dell'imposta sul capital gain (26% azioni/ETF, 12,5% bond white-list; nessuna imposta sulle minusvalenze, senza
+                    compensazione dello zainetto). "Valore Attuale" = prezzo di oggi × quantità venduta.
                   </p>
                 </div>
               )}

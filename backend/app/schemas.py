@@ -369,8 +369,11 @@ class ClosedPositionRow(BaseModel):
     quantity: float             # quantità totale movimentata (= venduta)
     avg_buy_price: float        # prezzo medio d'acquisto, EUR
     avg_sell_price: float       # prezzo medio di vendita, EUR
-    realized_pnl: float         # EUR
+    buy_value: float            # controvalore d'acquisto totale (prezzo × qtà), EUR
+    sell_value: float           # controvalore di vendita totale (prezzo × qtà), EUR
+    realized_pnl: float         # EUR, LORDO di tasse (netto commissioni)
     realized_pnl_pct: float
+    realized_pnl_net: float     # EUR, al netto della stima imposta capital gain (26%/12,5%)
     current_price: Optional[float] = None   # prezzo attuale, EUR (None se non disponibile)
     current_value: Optional[float] = None   # valore ipotetico oggi = prezzo × quantità venduta, EUR
     first_buy_date: Optional[date] = None

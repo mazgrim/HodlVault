@@ -242,6 +242,13 @@ class DashboardCalculator:
             realized = a["realized"]
             realized_pct = (realized / a["buy_cost"] * 100) if a["buy_cost"] else 0.0
 
+            # P&L netto: stima imposta capital gain solo sulle plusvalenze (le
+            # minusvalenze non generano imposta). 12,5% per i bond white-list,
+            # 26% per il resto — coerente con la sezione "Tasse (stima)".
+            cg_rate = 0.125 if inst.asset_class == AssetClass.BOND else 0.26
+            tax = realized * cg_rate if realized > 0 else 0.0
+            realized_net = realized - tax
+
             current_price = None
             current_value = None
             raw_price = self.market.latest_price(iid)
@@ -259,8 +266,11 @@ class DashboardCalculator:
                 quantity=round(a["sell_qty"], 6),
                 avg_buy_price=round(avg_buy, 4),
                 avg_sell_price=round(avg_sell, 4),
+                buy_value=round(a["buy_cost"], 2),
+                sell_value=round(a["sell_proceeds"], 2),
                 realized_pnl=round(realized, 2),
                 realized_pnl_pct=round(realized_pct, 2),
+                realized_pnl_net=round(realized_net, 2),
                 current_price=round(current_price, 4) if current_price is not None else None,
                 current_value=current_value,
                 first_buy_date=a["first_buy"],

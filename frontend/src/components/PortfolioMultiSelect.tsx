@@ -4,15 +4,16 @@ import { Portfolio } from '../context/PortfoliosContext'
 
 interface Props {
   portfolios: Portfolio[]
-  selected: number[]                 // vuoto = tutti i portafogli
+  selected: number[]                 // set ESPLICITO dei portafogli spuntati
   onChange: (ids: number[]) => void
 }
 
 /**
- * Selettore portafogli multi-selezione (Dashboard). Convenzione: `selected` vuoto
- * = TUTTI (tutte le caselle spuntate). Deselezionando si escludono i portafogli;
- * deve restarne almeno uno. Quando si tornano a spuntare tutti, normalizza a []
- * (tutti). Il PortfolioSelector single-select resta separato per le altre pagine.
+ * Selettore portafogli multi-selezione (Dashboard). I toggle sono indipendenti:
+ * cliccarne uno accende/spegne solo quello. È ammesso deselezionarli tutti, così
+ * si passa da un portafoglio all'altro senza dover prima arrivare a due. "Tutti i
+ * portafogli" li spunta tutti. Il default (tutti) è gestito dalla Dashboard. Il
+ * PortfolioSelector single-select resta separato per le altre pagine.
  */
 export default function PortfolioMultiSelect({ portfolios, selected, onChange }: Props) {
   const [open, setOpen] = useState(false)
@@ -28,21 +29,20 @@ export default function PortfolioMultiSelect({ portfolios, selected, onChange }:
   }, [open])
 
   const allIds = portfolios.map((p) => p.id)
-  const isAll = selected.length === 0 || selected.length === allIds.length
-  const effective = isAll ? allIds : selected
+  const isAll = selected.length === allIds.length && allIds.length > 0
 
   const toggle = (id: number) => {
-    const base = isAll ? allIds : selected
-    const next = base.includes(id) ? base.filter((x) => x !== id) : [...base, id]
-    if (next.length === 0) return                       // almeno un portafoglio
-    onChange(next.length === allIds.length ? [] : next)
+    const next = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]
+    onChange(next)                                      // zero ammesso
   }
 
-  const label = isAll
-    ? 'Tutti i portafogli'
-    : selected.length === 1
-      ? (portfolios.find((p) => p.id === selected[0])?.name ?? '1 portafoglio')
-      : `${selected.length} portafogli`
+  const label = selected.length === 0
+    ? 'Nessun portafoglio'
+    : isAll
+      ? 'Tutti i portafogli'
+      : selected.length === 1
+        ? (portfolios.find((p) => p.id === selected[0])?.name ?? '1 portafoglio')
+        : `${selected.length} portafogli`
 
   // Con un solo portafoglio la multi-selezione non ha senso: etichetta statica.
   if (portfolios.length <= 1) {
@@ -63,8 +63,8 @@ export default function PortfolioMultiSelect({ portfolios, selected, onChange }:
         aria-expanded={open}
       >
         <span className="flex items-center gap-1.5 truncate">
-          {!isAll && <Layers size={14} className="text-gold-500 flex-shrink-0" />}
-          <span className="truncate">{label}</span>
+          {!isAll && selected.length > 0 && <Layers size={14} className="text-gold-500 flex-shrink-0" />}
+          <span className={`truncate ${selected.length === 0 ? 'text-amber-400' : ''}`}>{label}</span>
         </span>
         <ChevronDown size={16} className={`text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -76,7 +76,7 @@ export default function PortfolioMultiSelect({ portfolios, selected, onChange }:
         >
           <button
             type="button"
-            onClick={() => onChange([])}
+            onClick={() => onChange(allIds)}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-navy-700 transition-colors"
           >
             <span className={`w-4 h-4 flex items-center justify-center rounded border ${isAll ? 'bg-gold-500 border-gold-500' : 'border-gray-500'}`}>
@@ -88,7 +88,7 @@ export default function PortfolioMultiSelect({ portfolios, selected, onChange }:
           <div className="my-1 border-t border-gray-700/50" />
 
           {portfolios.map((p) => {
-            const checked = effective.includes(p.id)
+            const checked = selected.includes(p.id)
             return (
               <button
                 key={p.id}

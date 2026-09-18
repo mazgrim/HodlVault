@@ -76,6 +76,43 @@ def _scope_key(portfolio_id):
     return portfolio_id
 
 
+def _xirr(flows: List[Tuple[date, float]]) -> Optional[float]:
+    """Tasso interno di rendimento annualizzato (XIRR) su flussi di cassa datati,
+    dal punto di vista dell'investitore: soldi versati (acquisti) negativi, soldi
+    rientrati (vendite, dividendi, valore finale) positivi. Risolve per bisezione
+    il tasso r con NPV=0. Serve almeno un flusso positivo e uno negativo; None se
+    non converge o i dati sono insufficienti."""
+    if len(flows) < 2:
+        return None
+    amounts = [a for _, a in flows]
+    if not (any(a > 0 for a in amounts) and any(a < 0 for a in amounts)):
+        return None
+    t0 = min(d for d, _ in flows)
+    years = [(d - t0).days / 365.0 for d, _ in flows]
+
+    def npv(r: float) -> float:
+        base = 1.0 + r
+        return sum(a / (base ** y) for a, y in zip(amounts, years))
+
+    lo, hi = -0.9999, 10.0
+    f_lo, f_hi = npv(lo), npv(hi)
+    if f_lo * f_hi > 0:
+        hi = 1000.0
+        f_hi = npv(hi)
+        if f_lo * f_hi > 0:
+            return None
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        f_mid = npv(mid)
+        if abs(f_mid) < 1e-7:
+            return mid
+        if f_lo * f_mid < 0:
+            hi, f_hi = mid, f_mid
+        else:
+            lo, f_lo = mid, f_mid
+    return (lo + hi) / 2
+
+
 # ── Dashboard Calculations ────────────────────────────────────────────────────
 
 class DashboardCalculator:
@@ -347,6 +384,7 @@ class DashboardCalculator:
         # portfolios with < ~90 days of history, where annualising a tiny window
         # produces meaningless blow-ups (e.g. +5% over 10 days → +450%).
         ann_return = self._annualized_twr(portfolio_id, age_days)
+        mwr = self._money_weighted_return(pids, positions, age_days)
 
         return schemas.DashboardKPIs(
             total_value=round(total_value, 2),
@@ -358,6 +396,7 @@ class DashboardCalculator:
             realized_dividends=round(realized_dividends, 2),
             total_pnl=round(unrealized_pnl + realized_pnl, 2),
             annualized_return=round(ann_return * 100, 2) if ann_return is not None else None,
+            money_weighted_return=round(mwr * 100, 2) if mwr is not None else None,
             portfolio_age_days=age_days,
             as_of_date=date.today(),
         )
@@ -444,6 +483,38 @@ class DashboardCalculator:
             return (end_v / start_v) ** (365 / span_days) - 1
         except (OverflowError, ValueError, ZeroDivisionError):
             return None
+
+    def _money_weighted_return(
+        self, pids: List[int], positions: List[schemas.PositionRow], age_days: int
+    ) -> Optional[float]:
+        """Rendimento annualizzato money-weighted (XIRR): tiene conto di quanto
+        capitale era investito in ogni momento, quindi segue il P&L reale (soldi
+        veri). Flussi: acquisti negativi, vendite e dividendi positivi, più il
+        valore attuale del portafoglio come flusso finale. None se < ~90 giorni.
+        Gli split non alterano i flussi (prezzo × quantità è invariante)."""
+        if age_days < 90 or not pids:
+            return None
+        flows: List[Tuple[date, float]] = []
+        txs = (
+            self.db.query(Transaction)
+            .filter(Transaction.portfolio_id.in_(pids))
+            .order_by(Transaction.date)
+            .all()
+        )
+        for tx in txs:
+            price_eur = tx.price / tx.fx_rate if tx.fx_rate else tx.price
+            fees_eur = tx.fees / tx.fx_rate if tx.fx_rate else tx.fees
+            if tx.type == TransactionType.BUY:
+                flows.append((tx.date, -(price_eur * tx.quantity + fees_eur)))
+            else:
+                flows.append((tx.date, price_eur * tx.quantity - fees_eur))
+        for ev in self.db.query(DividendEvent).filter(DividendEvent.portfolio_id.in_(pids)).all():
+            amt = ev.amount / ev.fx_rate if ev.fx_rate else ev.amount
+            flows.append((ev.date, amt))
+        total_value = sum(p.market_value for p in positions)
+        if total_value:
+            flows.append((date.today(), total_value))
+        return _xirr(flows)
 
     def portfolio_chart(
         self, portfolio_id: Optional[int] = None, period: str = "1Y",

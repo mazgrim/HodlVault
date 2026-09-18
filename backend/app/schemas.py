@@ -410,7 +410,8 @@ class DashboardKPIs(BaseModel):
     realized_trade_pnl: float = 0.0  # realized gains from closed trades only
     realized_dividends: float = 0.0  # dividends + coupons cashed (EUR)
     total_pnl: float = 0.0           # unrealized + realized
-    annualized_return: Optional[float] = None  # TWR-based; None when < ~90 days of history
+    annualized_return: Optional[float] = None  # TWR annualizzato; None se < ~90 giorni di storia
+    money_weighted_return: Optional[float] = None  # XIRR annualizzato sui flussi di cassa reali
     portfolio_age_days: int
     as_of_date: date
 

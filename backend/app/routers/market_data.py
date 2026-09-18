@@ -14,6 +14,15 @@ from ..services.market import MarketService
 router = APIRouter()
 
 
+def _parse_pf_ids(portfolio_id: Optional[str]) -> Optional[List[int]]:
+    """Query param `portfolio_id`: singolo id ("3") o lista comma-separated ("3,5")
+    per la selezione multipla in Dashboard. Restituisce None (= tutti) se vuoto."""
+    if not portfolio_id:
+        return None
+    ids = [int(x) for x in portfolio_id.split(",") if x.strip().isdigit()]
+    return ids or None
+
+
 @router.get("/instruments/search")
 async def search_instruments(
     q: str = Query(..., min_length=1, max_length=100),
@@ -447,47 +456,47 @@ def fx_rates(
 
 @router.get("/dashboard/kpis", response_model=schemas.DashboardKPIs)
 def dashboard_kpis(
-    portfolio_id: Optional[int] = Query(None),
+    portfolio_id: Optional[str] = Query(None, description="Id singolo o lista comma-separated (selezione multipla)"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     from ..services.calculations import DashboardCalculator
     calc = DashboardCalculator(db, current_user.id)
-    return calc.kpis(portfolio_id)
+    return calc.kpis(_parse_pf_ids(portfolio_id))
 
 
 @router.get("/dashboard/positions", response_model=List[schemas.PositionRow])
 def open_positions(
-    portfolio_id: Optional[int] = Query(None),
+    portfolio_id: Optional[str] = Query(None, description="Id singolo o lista comma-separated (selezione multipla)"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     from ..services.calculations import DashboardCalculator
     calc = DashboardCalculator(db, current_user.id)
-    return calc.open_positions(portfolio_id)
+    return calc.open_positions(_parse_pf_ids(portfolio_id))
 
 
 @router.get("/dashboard/closed-positions", response_model=List[schemas.ClosedPositionRow])
 def closed_positions(
-    portfolio_id: Optional[int] = Query(None),
+    portfolio_id: Optional[str] = Query(None, description="Id singolo o lista comma-separated (selezione multipla)"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     from ..services.calculations import DashboardCalculator
     calc = DashboardCalculator(db, current_user.id)
-    return calc.closed_positions(portfolio_id)
+    return calc.closed_positions(_parse_pf_ids(portfolio_id))
 
 
 @router.get("/dashboard/chart", response_model=schemas.PortfolioChartResponse)
 def portfolio_chart(
-    portfolio_id: Optional[int] = Query(None),
+    portfolio_id: Optional[str] = Query(None, description="Id singolo o lista comma-separated (selezione multipla)"),
     period: str = Query("1Y"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     from ..services.calculations import DashboardCalculator
     calc = DashboardCalculator(db, current_user.id)
-    return calc.portfolio_chart(portfolio_id, period)
+    return calc.portfolio_chart(_parse_pf_ids(portfolio_id), period)
 
 
 @router.get("/analysis", response_model=schemas.AnalysisResponse)

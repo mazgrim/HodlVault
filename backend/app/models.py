@@ -222,6 +222,30 @@ class PriceHistory(Base):
     )
 
 
+class StockSplit(Base):
+    """Operazione societaria: split / raggruppamento azionario. Dato dello
+    strumento (come price_history). Rapporto `new_shares` : `old_shares` — un
+    raggruppamento 10:1 (10 vecchie → 1 nuova) è old=10, new=1 (ratio 0.1); uno
+    split 1:3 (1 → 3) è old=1, new=3 (ratio 3). Il calcolatore normalizza le
+    transazioni con data PRECEDENTE alla data dello split a termini post-split:
+    quantità × ratio, prezzo ÷ ratio — il controvalore (e quindi il costo) resta
+    invariato, ma la posizione netta e la chiusura tornano corrette."""
+    __tablename__ = "stock_splits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    old_shares = Column(Float, nullable=False)   # denominatore (vecchie)
+    new_shares = Column(Float, nullable=False)   # numeratore (nuove)
+    note = Column(String(256), nullable=True)
+
+    instrument = relationship("Instrument")
+
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "date", name="uq_stock_split"),
+    )
+
+
 class EtfProfile(Base):
     """Look-through asset-class split + category for an ETF (from Yahoo topHoldings)."""
     __tablename__ = "etf_profiles"

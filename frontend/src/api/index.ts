@@ -66,8 +66,8 @@ export const marketApi = {
     api.get('/market/fx-rates', { params: pair ? { pair } : {} }),
   createInstrument: (data: object) => api.post('/market/instruments', data),
   updateInstrument: (id: number, data: object) => api.patch(`/market/instruments/${id}`, data),
-  instrumentDetail: (id: number) =>
-    api.get(`/market/instruments/${id}/detail`),
+  instrumentDetail: (id: number, portfolio_id?: number | null) =>
+    api.get(`/market/instruments/${id}/detail`, { params: portfolio_id ? { portfolio_id } : {} }),
   instrumentPriceChart: (id: number, period: string) =>
     api.get(`/market/instruments/${id}/price-chart`, { params: { period } }),
   // Fonti prezzo alternative a Yahoo
@@ -97,6 +97,15 @@ export const couponApi = {
     api.post(`/coupons/${id}/confirm`, data),
   skip: (id: number) => api.post(`/coupons/${id}/skip`),
   reset: (id: number) => api.post(`/coupons/${id}/reset`),
+}
+
+// ── Split / raggruppamenti azionari ─────────────────────────────────────────────
+export const splitApi = {
+  list: (instrument_id: number) =>
+    api.get('/splits/', { params: { instrument_id } }),
+  create: (data: { instrument_id: number; date: string; old_shares: number; new_shares: number; note?: string }) =>
+    api.post('/splits/', data),
+  delete: (id: number) => api.delete(`/splits/${id}`),
 }
 
 // ── Performance ───────────────────────────────────────────────────────────────

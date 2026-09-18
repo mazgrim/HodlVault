@@ -20,6 +20,7 @@ from .. import models, schemas
 from ..models import (
     Transaction, Portfolio, Instrument, PriceHistory, DividendEvent, FxRate, TransactionType,
     DividendType, DividendSource, EtfProfile, EtfHolding, EtfSectorWeight, EtfRegionWeight, SecurityProfile, AssetClass,
+    StockSplit,
 )
 from .market import MarketService
 from . import taxonomy
@@ -75,6 +76,43 @@ def _scope_key(portfolio_id):
     return portfolio_id
 
 
+def _xirr(flows: List[Tuple[date, float]]) -> Optional[float]:
+    """Tasso interno di rendimento annualizzato (XIRR) su flussi di cassa datati,
+    dal punto di vista dell'investitore: soldi versati (acquisti) negativi, soldi
+    rientrati (vendite, dividendi, valore finale) positivi. Risolve per bisezione
+    il tasso r con NPV=0. Serve almeno un flusso positivo e uno negativo; None se
+    non converge o i dati sono insufficienti."""
+    if len(flows) < 2:
+        return None
+    amounts = [a for _, a in flows]
+    if not (any(a > 0 for a in amounts) and any(a < 0 for a in amounts)):
+        return None
+    t0 = min(d for d, _ in flows)
+    years = [(d - t0).days / 365.0 for d, _ in flows]
+
+    def npv(r: float) -> float:
+        base = 1.0 + r
+        return sum(a / (base ** y) for a, y in zip(amounts, years))
+
+    lo, hi = -0.9999, 10.0
+    f_lo, f_hi = npv(lo), npv(hi)
+    if f_lo * f_hi > 0:
+        hi = 1000.0
+        f_hi = npv(hi)
+        if f_lo * f_hi > 0:
+            return None
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        f_mid = npv(mid)
+        if abs(f_mid) < 1e-7:
+            return mid
+        if f_lo * f_mid < 0:
+            hi, f_hi = mid, f_mid
+        else:
+            lo, f_lo = mid, f_mid
+    return (lo + hi) / 2
+
+
 # ── Dashboard Calculations ────────────────────────────────────────────────────
 
 class DashboardCalculator:
@@ -82,6 +120,25 @@ class DashboardCalculator:
         self.db = db
         self.user_id = user_id
         self.market = MarketService(db)
+        self._splits_cache: Optional[Dict[int, List[Tuple[date, float]]]] = None
+
+    def _split_factor(self, instrument_id: int, tx_date: date) -> float:
+        """Fattore di normalizzazione post-split per una transazione: prodotto dei
+        rapporti (new/old) degli split con data SUCCESSIVA a `tx_date`. La quantità
+        normalizzata è qty × fattore e il prezzo unitario prezzo ÷ fattore, così il
+        controvalore (e il costo) resta invariato ma la posizione netta si chiude
+        correttamente dopo un raggruppamento. 1.0 se non ci sono split successivi."""
+        if self._splits_cache is None:
+            cache: Dict[int, List[Tuple[date, float]]] = {}
+            for s in self.db.query(StockSplit).all():
+                ratio = (s.new_shares / s.old_shares) if s.old_shares else 1.0
+                cache.setdefault(s.instrument_id, []).append((s.date, ratio))
+            self._splits_cache = cache
+        factor = 1.0
+        for d, ratio in self._splits_cache.get(instrument_id, ()):
+            if d > tx_date:
+                factor *= ratio
+        return factor
 
     def _build_fx_lookup(self, currencies):
         """Return fn(currency, date) -> FX divisor (foreign units per 1 EUR) using
@@ -138,20 +195,23 @@ class DashboardCalculator:
                 book[iid] = {"qty": 0.0, "cost_eur": 0.0, "instrument": tx.instrument}
                 realized_pnl[iid] = 0.0
 
-            price_eur = tx.price / tx.fx_rate if tx.fx_rate else tx.price
+            f = self._split_factor(iid, tx.date)
+            qty = tx.quantity * f
+            unit = tx.price / f
+            price_eur = unit / tx.fx_rate if tx.fx_rate else unit
             fees_eur = tx.fees / tx.fx_rate if tx.fx_rate else tx.fees
 
             if tx.type == TransactionType.BUY:
-                total_cost = price_eur * tx.quantity + fees_eur
+                total_cost = price_eur * qty + fees_eur
                 book[iid]["cost_eur"] += total_cost
-                book[iid]["qty"] += tx.quantity
+                book[iid]["qty"] += qty
             else:  # SELL
                 if book[iid]["qty"] > 0:
                     avg = book[iid]["cost_eur"] / book[iid]["qty"]
-                    proceeds = price_eur * tx.quantity - fees_eur
-                    realized_pnl[iid] += proceeds - avg * tx.quantity
-                    book[iid]["cost_eur"] -= avg * tx.quantity
-                    book[iid]["qty"] -= tx.quantity
+                    proceeds = price_eur * qty - fees_eur
+                    realized_pnl[iid] += proceeds - avg * qty
+                    book[iid]["cost_eur"] -= avg * qty
+                    book[iid]["qty"] -= qty
 
         positions = []
         total_market_value = 0.0
@@ -222,25 +282,28 @@ class DashboardCalculator:
                     "buy_qty": 0.0, "buy_cost": 0.0, "sell_qty": 0.0, "sell_proceeds": 0.0,
                     "realized": 0.0, "first_buy": None, "last_sell": None,
                 }
-            price_eur = tx.price / tx.fx_rate if tx.fx_rate else tx.price
+            f = self._split_factor(iid, tx.date)
+            qty = tx.quantity * f
+            unit = tx.price / f
+            price_eur = unit / tx.fx_rate if tx.fx_rate else unit
             fees_eur = tx.fees / tx.fx_rate if tx.fx_rate else tx.fees
 
             if tx.type == TransactionType.BUY:
-                a["cost_eur"] += price_eur * tx.quantity + fees_eur
-                a["qty"] += tx.quantity
-                a["buy_qty"] += tx.quantity
-                a["buy_cost"] += price_eur * tx.quantity + fees_eur
+                a["cost_eur"] += price_eur * qty + fees_eur
+                a["qty"] += qty
+                a["buy_qty"] += qty
+                a["buy_cost"] += price_eur * qty + fees_eur
                 if a["first_buy"] is None:
                     a["first_buy"] = tx.date
             else:  # SELL
                 if a["qty"] > 0:
                     avg = a["cost_eur"] / a["qty"]
-                    proceeds = price_eur * tx.quantity - fees_eur
-                    a["realized"] += proceeds - avg * tx.quantity
-                    a["cost_eur"] -= avg * tx.quantity
-                    a["qty"] -= tx.quantity
-                a["sell_qty"] += tx.quantity
-                a["sell_proceeds"] += price_eur * tx.quantity - fees_eur
+                    proceeds = price_eur * qty - fees_eur
+                    a["realized"] += proceeds - avg * qty
+                    a["cost_eur"] -= avg * qty
+                    a["qty"] -= qty
+                a["sell_qty"] += qty
+                a["sell_proceeds"] += price_eur * qty - fees_eur
                 a["last_sell"] = tx.date
 
         result = []
@@ -321,6 +384,7 @@ class DashboardCalculator:
         # portfolios with < ~90 days of history, where annualising a tiny window
         # produces meaningless blow-ups (e.g. +5% over 10 days → +450%).
         ann_return = self._annualized_twr(portfolio_id, age_days)
+        mwr = self._money_weighted_return(pids, positions, age_days)
 
         return schemas.DashboardKPIs(
             total_value=round(total_value, 2),
@@ -332,6 +396,7 @@ class DashboardCalculator:
             realized_dividends=round(realized_dividends, 2),
             total_pnl=round(unrealized_pnl + realized_pnl, 2),
             annualized_return=round(ann_return * 100, 2) if ann_return is not None else None,
+            money_weighted_return=round(mwr * 100, 2) if mwr is not None else None,
             portfolio_age_days=age_days,
             as_of_date=date.today(),
         )
@@ -419,6 +484,38 @@ class DashboardCalculator:
         except (OverflowError, ValueError, ZeroDivisionError):
             return None
 
+    def _money_weighted_return(
+        self, pids: List[int], positions: List[schemas.PositionRow], age_days: int
+    ) -> Optional[float]:
+        """Rendimento annualizzato money-weighted (XIRR): tiene conto di quanto
+        capitale era investito in ogni momento, quindi segue il P&L reale (soldi
+        veri). Flussi: acquisti negativi, vendite e dividendi positivi, più il
+        valore attuale del portafoglio come flusso finale. None se < ~90 giorni.
+        Gli split non alterano i flussi (prezzo × quantità è invariante)."""
+        if age_days < 90 or not pids:
+            return None
+        flows: List[Tuple[date, float]] = []
+        txs = (
+            self.db.query(Transaction)
+            .filter(Transaction.portfolio_id.in_(pids))
+            .order_by(Transaction.date)
+            .all()
+        )
+        for tx in txs:
+            price_eur = tx.price / tx.fx_rate if tx.fx_rate else tx.price
+            fees_eur = tx.fees / tx.fx_rate if tx.fx_rate else tx.fees
+            if tx.type == TransactionType.BUY:
+                flows.append((tx.date, -(price_eur * tx.quantity + fees_eur)))
+            else:
+                flows.append((tx.date, price_eur * tx.quantity - fees_eur))
+        for ev in self.db.query(DividendEvent).filter(DividendEvent.portfolio_id.in_(pids)).all():
+            amt = ev.amount / ev.fx_rate if ev.fx_rate else ev.amount
+            flows.append((ev.date, amt))
+        total_value = sum(p.market_value for p in positions)
+        if total_value:
+            flows.append((date.today(), total_value))
+        return _xirr(flows)
+
     def portfolio_chart(
         self, portfolio_id: Optional[int] = None, period: str = "1Y",
         exclude_instrument_ids: Optional[List[int]] = None,
@@ -499,10 +596,11 @@ class DashboardCalculator:
         for chart_date in all_dates:
             while ti < len(sorted_txs) and sorted_txs[ti].date <= chart_date:
                 tx = sorted_txs[ti]
+                qty = tx.quantity * self._split_factor(tx.instrument_id, tx.date)
                 if tx.type == TransactionType.BUY:
-                    running_book[tx.instrument_id] += tx.quantity
+                    running_book[tx.instrument_id] += qty
                 else:
-                    running_book[tx.instrument_id] -= tx.quantity
+                    running_book[tx.instrument_id] -= qty
                 ti += 1
 
             total = 0.0
@@ -856,10 +954,11 @@ class DashboardCalculator:
             # Apply all cash flows up to and including this date
             while ti < len(sorted_txs) and sorted_txs[ti].date <= d:
                 tx = sorted_txs[ti]
+                qty = tx.quantity * self._split_factor(tx.instrument_id, tx.date)
                 if tx.type == TransactionType.BUY:
-                    running_book[tx.instrument_id] += tx.quantity
+                    running_book[tx.instrument_id] += qty
                 else:
-                    running_book[tx.instrument_id] -= tx.quantity
+                    running_book[tx.instrument_id] -= qty
                 ti += 1
 
             prev_value = _book_value(running_book, d)
@@ -880,18 +979,21 @@ class DashboardCalculator:
             iid = tx.instrument_id
             if iid not in book:
                 book[iid] = {"qty": 0.0, "cost": 0.0}
-            price_eur = tx.price / tx.fx_rate if tx.fx_rate else tx.price
+            f = self._split_factor(iid, tx.date)
+            qty = tx.quantity * f
+            unit = tx.price / f
+            price_eur = unit / tx.fx_rate if tx.fx_rate else unit
             fees_eur = tx.fees / tx.fx_rate if tx.fx_rate else tx.fees
             if tx.type == TransactionType.BUY:
-                book[iid]["cost"] += price_eur * tx.quantity + fees_eur
-                book[iid]["qty"] += tx.quantity
+                book[iid]["cost"] += price_eur * qty + fees_eur
+                book[iid]["qty"] += qty
             else:
                 if book[iid]["qty"] > 0:
                     avg = book[iid]["cost"] / book[iid]["qty"]
-                    proceeds = price_eur * tx.quantity - fees_eur
-                    realized += proceeds - avg * tx.quantity
-                    book[iid]["cost"] -= avg * tx.quantity
-                    book[iid]["qty"] -= tx.quantity
+                    proceeds = price_eur * qty - fees_eur
+                    realized += proceeds - avg * qty
+                    book[iid]["cost"] -= avg * qty
+                    book[iid]["qty"] -= qty
         return realized
 
     def _calc_realized_dividends(self, pids: List[int]) -> float:

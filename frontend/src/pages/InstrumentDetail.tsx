@@ -10,6 +10,7 @@ import ChangeBadge from '../components/ChangeBadge'
 import { PageSpinner } from '../components/Spinner'
 import InstrumentSettingsModal from '../components/InstrumentSettingsModal'
 import CouponScheduleSection from '../components/CouponScheduleSection'
+import SplitSection from '../components/SplitSection'
 import { marketApi } from '../api'
 import { fmtEur, fmtPct, fmtNum, fmtDate, fmtDateTime, fmtTime, pnlClass, pnlSign } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
@@ -71,6 +72,12 @@ interface DivRow {
   type: string
 }
 
+interface PortfolioRef {
+  id: number
+  name: string
+  broker: string | null
+}
+
 interface InstrumentDetailData {
   instrument: InstrumentInfo
   position: PositionKPI | null
@@ -78,6 +85,7 @@ interface InstrumentDetailData {
   dividends: DivRow[]
   buy_dates: string[]
   sell_dates: string[]
+  portfolios: PortfolioRef[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -172,6 +180,9 @@ export default function InstrumentDetail() {
   const [period, setPeriod]         = useState<Period>('1A')
   const [loading, setLoading]       = useState(true)
   const [chartLoading, setChartLoading] = useState(false)
+  // Filtro portafoglio: null = tutti. Lo stesso ticker è condiviso tra broker;
+  // filtrando si vedono transazioni/dividendi/posizione di un solo portafoglio.
+  const [pfFilter, setPfFilter]     = useState<number | null>(null)
 
   // ── Fonte prezzo: impostazioni, inserimento manuale, refresh custom ────────
   const [showSettings, setShowSettings] = useState(false)
@@ -186,14 +197,14 @@ export default function InstrumentDetail() {
     if (!instId) return
     setLoading(true)
     try {
-      const res = await marketApi.instrumentDetail(instId)
+      const res = await marketApi.instrumentDetail(instId, pfFilter)
       setDetail(res.data)
     } catch {
       setDetail(null)
     } finally {
       setLoading(false)
     }
-  }, [instId])
+  }, [instId, pfFilter])
 
   // ── Load price chart ───────────────────────────────────────────────────────
   const loadChart = useCallback(async () => {
@@ -261,7 +272,7 @@ export default function InstrumentDetail() {
     )
   }
 
-  const { instrument, position, transactions, dividends, buy_dates, sell_dates } = detail
+  const { instrument, position, transactions, dividends, buy_dates, sell_dates, portfolios } = detail
 
   // ── Period change (from the visible chart): native price move first→last,
   // plus the EUR move on the held position (price delta at today's FX rate). ──
@@ -332,13 +343,30 @@ export default function InstrumentDetail() {
               )}
             </div>
           </div>
-          <button
-            onClick={() => setShowSettings(true)}
-            title="Modifica nome, classe, valuta e fonte prezzo dello strumento"
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-gray-600/40 rounded-lg px-2.5 py-1.5 transition-colors flex-shrink-0"
-          >
-            <Settings size={13} /> Impostazioni
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {portfolios.length > 1 && (
+              <select
+                value={pfFilter ?? ''}
+                onChange={(e) => setPfFilter(e.target.value === '' ? null : Number(e.target.value))}
+                title="Filtra transazioni, dividendi e posizione per portafoglio (lo stesso titolo su broker diversi resta separato)"
+                className="input text-xs py-1.5 max-w-[200px]"
+              >
+                <option value="">Tutti i portafogli</option>
+                {portfolios.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}{p.broker ? ` — ${p.broker}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              onClick={() => setShowSettings(true)}
+              title="Modifica nome, classe, valuta e fonte prezzo dello strumento"
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-gray-600/40 rounded-lg px-2.5 py-1.5 transition-colors"
+            >
+              <Settings size={13} /> Impostazioni
+            </button>
+          </div>
         </div>
       </div>
 
@@ -624,6 +652,9 @@ export default function InstrumentDetail() {
         quantity={position?.quantity ?? null}
         onChanged={loadDetail}
       />
+
+      {/* ── Split / Raggruppamenti ────────────────────────────────────────── */}
+      <SplitSection instrumentId={instrument.id} onChanged={reloadAll} />
 
       {/* ── Personal Transactions ─────────────────────────────────────────── */}
       <div className="card">

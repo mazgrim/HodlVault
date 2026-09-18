@@ -48,6 +48,7 @@ interface KPIs {
   realized_dividends: number
   total_pnl: number
   annualized_return: number | null
+  money_weighted_return: number | null
   portfolio_age_days: number
   as_of_date: string
 }
@@ -268,12 +269,34 @@ export default function Dashboard() {
               colorByValue={kpis?.total_pnl}
               subtitle="Non Realizzato + Realizzato"
             />
-            <KpiCard
-              center
-              title="Rendimento Annualizzato"
-              value={kpis?.annualized_return != null ? fmtPct(kpis.annualized_return, true) : 'N/D'}
-              subtitle={kpis?.annualized_return == null ? 'Storico insufficiente' : undefined}
-            />
+            {/* Rendimento Annualizzato — due misure complementari */}
+            <div className="card border-gray-700/40 flex flex-col items-center text-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Rendimento Annualizzato</span>
+                <InfoHint text="Due misure complementari del rendimento annuo. Time-Weighted (TWR): performance di mercato neutrale ai versamenti — quanto hanno reso gli strumenti nel tempo, a prescindere da quando hai messo i soldi. Money-Weighted (XIRR): rendimento effettivo del tuo capitale, che tiene conto di quanto avevi investito in ogni momento — segue il P&L reale. Possono differire (anche di segno) se hai versato/prelevato in momenti favorevoli o sfavorevoli. N/D con meno di ~90 giorni di storico." />
+              </div>
+              {kpis?.annualized_return == null && kpis?.money_weighted_return == null ? (
+                <div className="flex-1 flex flex-col justify-center">
+                  <span className="text-xl font-bold text-gray-300">N/D</span>
+                  <div className="text-[11px] text-gray-600 mt-1">Storico insufficiente</div>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col justify-center gap-2 w-full">
+                  <div>
+                    <div className={`text-lg sm:text-xl font-bold tabular-nums ${pnlClass(kpis?.annualized_return ?? 0)}`}>
+                      {kpis?.annualized_return != null ? fmtPct(kpis.annualized_return, true) : 'N/D'}
+                    </div>
+                    <div className="text-[11px] text-gray-500">Time-Weighted (TWR)</div>
+                  </div>
+                  <div className="border-t border-gray-700/40 pt-2">
+                    <div className={`text-lg sm:text-xl font-bold tabular-nums ${pnlClass(kpis?.money_weighted_return ?? 0)}`}>
+                      {kpis?.money_weighted_return != null ? fmtPct(kpis.money_weighted_return, true) : 'N/D'}
+                    </div>
+                    <div className="text-[11px] text-gray-500">Money-Weighted (XIRR)</div>
+                  </div>
+                </div>
+              )}
+            </div>
             <KpiCard
               center
               title="Età Portafoglio"

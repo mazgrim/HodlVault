@@ -6,7 +6,7 @@ import KpiCard from '../components/KpiCard'
 import ChangeBadge from '../components/ChangeBadge'
 import InfoHint from '../components/InfoHint'
 import TaxDetailModal from '../components/TaxDetailModal'
-import PortfolioSelector from '../components/PortfolioSelector'
+import PortfolioMultiSelect from '../components/PortfolioMultiSelect'
 import { PageSpinner } from '../components/Spinner'
 import { usePortfolios } from '../context/PortfoliosContext'
 import { marketApi } from '../api'
@@ -93,7 +93,7 @@ interface ClosedPosition {
 export default function Dashboard() {
   const { tooltip } = useChartTheme()
   const { portfolios, loading: pfLoading } = usePortfolios()
-  const [selectedPf, setSelectedPf] = useState<number | null>(null)
+  const [selectedPfs, setSelectedPfs] = useState<number[]>([])   // vuoto = tutti
   const [kpis, setKpis] = useState<KPIs | null>(null)
   const [positions, setPositions] = useState<Position[]>([])
   const [chart, setChart] = useState<{ date: string; value: number }[]>([])
@@ -116,10 +116,10 @@ export default function Dashboard() {
     setLoading(true)
     try {
       const [kRes, pRes, cRes, clRes] = await Promise.all([
-        marketApi.kpis(selectedPf ?? undefined),
-        marketApi.positions(selectedPf ?? undefined),
-        marketApi.chart(selectedPf ?? undefined, period),
-        marketApi.closedPositions(selectedPf ?? undefined),
+        marketApi.kpis(selectedPfs),
+        marketApi.positions(selectedPfs),
+        marketApi.chart(selectedPfs, period),
+        marketApi.closedPositions(selectedPfs),
       ])
       setKpis(kRes.data)
       setPositions(pRes.data)
@@ -131,7 +131,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }, [selectedPf, period])
+  }, [selectedPfs, period])
 
   useEffect(() => { load() }, [load])
 
@@ -165,7 +165,7 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-gray-100">Dashboard</h1>
-        <PortfolioSelector portfolios={portfolios} selected={selectedPf} onChange={setSelectedPf} />
+        <PortfolioMultiSelect portfolios={portfolios} selected={selectedPfs} onChange={setSelectedPfs} />
       </div>
 
       {loading ? (

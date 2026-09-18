@@ -55,11 +55,24 @@ def _cached_series(key: tuple, compute):
         return result
 
 
-def _user_portfolio_ids(user_id: int, db: Session, portfolio_id: Optional[int] = None) -> List[int]:
+def _user_portfolio_ids(user_id: int, db: Session, portfolio_id=None) -> List[int]:
+    """Portafogli dell'utente, opzionalmente ristretti a uno scope. `portfolio_id`
+    può essere un singolo id, una lista/tupla di id (selezione multipla in
+    Dashboard) o None (tutti). Il filtro resta sempre entro i portafogli
+    dell'utente, quindi id non suoi vengono semplicemente ignorati."""
     q = db.query(Portfolio.id).filter(Portfolio.user_id == user_id)
     if portfolio_id:
-        q = q.filter(Portfolio.id == portfolio_id)
+        ids = list(portfolio_id) if isinstance(portfolio_id, (list, tuple, set)) else [portfolio_id]
+        q = q.filter(Portfolio.id.in_(ids))
     return [r[0] for r in q.all()]
+
+
+def _scope_key(portfolio_id):
+    """Forma hashabile dello scope per le chiavi di cache (una lista non è
+    hashabile): una lista/tupla/set diventa una tupla ordinata, il resto invariato."""
+    if isinstance(portfolio_id, (list, tuple, set)):
+        return tuple(sorted(portfolio_id))
+    return portfolio_id
 
 
 # ── Dashboard Calculations ────────────────────────────────────────────────────
@@ -410,7 +423,7 @@ class DashboardCalculator:
         self, portfolio_id: Optional[int] = None, period: str = "1Y",
         exclude_instrument_ids: Optional[List[int]] = None,
     ) -> schemas.PortfolioChartResponse:
-        key = ("chart", self.user_id, portfolio_id, period, tuple(sorted(exclude_instrument_ids or ())))
+        key = ("chart", self.user_id, _scope_key(portfolio_id), period, tuple(sorted(exclude_instrument_ids or ())))
         return _cached_series(key, lambda: self._portfolio_chart_compute(portfolio_id, period, exclude_instrument_ids))
 
     def _portfolio_chart_compute(
@@ -748,7 +761,7 @@ class DashboardCalculator:
         self, portfolio_id: Optional[int] = None, period: str = "All",
         exclude_instrument_ids: Optional[List[int]] = None,
     ) -> List[Tuple[date, float]]:
-        key = ("twr", self.user_id, portfolio_id, period, tuple(sorted(exclude_instrument_ids or ())))
+        key = ("twr", self.user_id, _scope_key(portfolio_id), period, tuple(sorted(exclude_instrument_ids or ())))
         return _cached_series(key, lambda: self._portfolio_twr_chart_compute(portfolio_id, period, exclude_instrument_ids))
 
     def _portfolio_twr_chart_compute(

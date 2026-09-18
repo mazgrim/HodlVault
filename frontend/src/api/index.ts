@@ -1,5 +1,10 @@
 import api from './client'
 
+// Scope portafogli per le API Dashboard: lista comma-separated su `portfolio_id`
+// (vuoto/undefined = tutti). Coerente con la serializzazione delle altre liste.
+const _pfParams = (ids?: number[]) =>
+  ids && ids.length ? { portfolio_id: ids.join(',') } : {}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const authApi = {
   login: (username: string, password: string) =>
@@ -38,14 +43,16 @@ export const txApi = {
 
 // ── Dashboard / Market ────────────────────────────────────────────────────────
 export const marketApi = {
-  kpis: (portfolio_id?: number) =>
-    api.get('/market/dashboard/kpis', { params: portfolio_id ? { portfolio_id } : {} }),
-  positions: (portfolio_id?: number) =>
-    api.get('/market/dashboard/positions', { params: portfolio_id ? { portfolio_id } : {} }),
-  closedPositions: (portfolio_id?: number) =>
-    api.get('/market/dashboard/closed-positions', { params: portfolio_id ? { portfolio_id } : {} }),
-  chart: (portfolio_id?: number, period = '1Y') =>
-    api.get('/market/dashboard/chart', { params: { period, ...(portfolio_id ? { portfolio_id } : {}) } }),
+  // portfolio_ids: nessuno o vuoto = tutti; più di uno = selezione multipla
+  // (serializzati comma-separated, come le altre API con liste).
+  kpis: (portfolio_ids?: number[]) =>
+    api.get('/market/dashboard/kpis', { params: _pfParams(portfolio_ids) }),
+  positions: (portfolio_ids?: number[]) =>
+    api.get('/market/dashboard/positions', { params: _pfParams(portfolio_ids) }),
+  closedPositions: (portfolio_ids?: number[]) =>
+    api.get('/market/dashboard/closed-positions', { params: _pfParams(portfolio_ids) }),
+  chart: (portfolio_ids?: number[], period = '1Y') =>
+    api.get('/market/dashboard/chart', { params: { period, ..._pfParams(portfolio_ids) } }),
   analysis: (portfolio_id?: number) =>
     api.get('/market/analysis', { params: portfolio_id ? { portfolio_id } : {} }),
   searchInstruments: (q: string) =>

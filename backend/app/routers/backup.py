@@ -43,7 +43,7 @@ router = APIRouter()
 # v2: fonte prezzo (price_source + config JSON custom), piano cedolare e storico
 # prezzi degli strumenti non-Yahoo (che un restore non può riscaricare).
 SCHEMA_VERSION = 2
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.10.0"
 
 
 # ── helpers: raccolta dati (SEMPRE scoped sull'utente) ────────────────────────

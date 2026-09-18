@@ -66,8 +66,8 @@ export const marketApi = {
     api.get('/market/fx-rates', { params: pair ? { pair } : {} }),
   createInstrument: (data: object) => api.post('/market/instruments', data),
   updateInstrument: (id: number, data: object) => api.patch(`/market/instruments/${id}`, data),
-  instrumentDetail: (id: number) =>
-    api.get(`/market/instruments/${id}/detail`),
+  instrumentDetail: (id: number, portfolio_id?: number | null) =>
+    api.get(`/market/instruments/${id}/detail`, { params: portfolio_id ? { portfolio_id } : {} }),
   instrumentPriceChart: (id: number, period: string) =>
     api.get(`/market/instruments/${id}/price-chart`, { params: { period } }),
   // Fonti prezzo alternative a Yahoo

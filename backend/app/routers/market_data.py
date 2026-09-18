@@ -233,12 +233,16 @@ async def lookup_instrument(
 @router.get("/instruments/{instrument_id}/detail")
 def instrument_detail(
     instrument_id: int,
+    portfolio_id: Optional[str] = Query(None, description="Filtra il dettaglio su un portafoglio (id singolo o lista comma-separated); vuoto = tutti"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     """
-    Returns instrument metadata, open-position KPIs for the current user,
-    all personal transactions, dividends, and buy dates (for chart markers).
+    Returns instrument metadata, open-position KPIs, personal transactions and
+    dividends. Lo stesso ticker è un unico strumento condiviso tra i portafogli
+    (prezzi/dividendi comuni); con `portfolio_id` la vista è ristretta a quel
+    portafoglio, così lo stesso titolo su broker diversi non viene mischiato
+    (transazioni, dividendi e posizione riflettono solo lo scope scelto).
     """
     from ..services.calculations import DashboardCalculator, _user_portfolio_ids
 
@@ -246,7 +250,8 @@ def instrument_detail(
     if not inst:
         raise HTTPException(status_code=404, detail="Strumento non trovato")
 
-    pids = _user_portfolio_ids(current_user.id, db)
+    scope = _parse_pf_ids(portfolio_id)
+    pids = _user_portfolio_ids(current_user.id, db, scope)
 
     txs = (
         db.query(models.Transaction)
@@ -268,10 +273,30 @@ def instrument_detail(
         .all()
     )
 
-    # Open position KPIs
+    # Portafogli (dell'utente) che detengono questo strumento — popolano il filtro
+    # in UI mostrando solo i broker rilevanti. Calcolati su TUTTI i portafogli,
+    # indipendentemente dallo scope corrente.
+    all_pids = _user_portfolio_ids(current_user.id, db)
+    holding_ids = {
+        r[0] for r in db.query(models.Transaction.portfolio_id)
+        .filter(models.Transaction.instrument_id == instrument_id,
+                models.Transaction.portfolio_id.in_(all_pids)).distinct()
+    } | {
+        r[0] for r in db.query(models.DividendEvent.portfolio_id)
+        .filter(models.DividendEvent.instrument_id == instrument_id,
+                models.DividendEvent.portfolio_id.in_(all_pids)).distinct()
+    }
+    holding_portfolios = (
+        db.query(models.Portfolio)
+        .filter(models.Portfolio.id.in_(holding_ids))
+        .order_by(models.Portfolio.name)
+        .all()
+    )
+
+    # Open position KPIs — ristrette allo scope selezionato.
     calc = DashboardCalculator(db, current_user.id)
-    all_positions = calc.open_positions()
-    position = next((p for p in all_positions if p.instrument_id == instrument_id), None)
+    positions = calc.open_positions(scope)
+    position = next((p for p in positions if p.instrument_id == instrument_id), None)
 
     buy_dates = [tx.date.isoformat() for tx in txs if tx.type == models.TransactionType.BUY]
     sell_dates = [tx.date.isoformat() for tx in txs if tx.type == models.TransactionType.SELL]
@@ -334,6 +359,11 @@ def instrument_detail(
         ],
         "buy_dates": buy_dates,
         "sell_dates": sell_dates,
+        # Portafogli che detengono lo strumento — per il filtro in UI.
+        "portfolios": [
+            {"id": p.id, "name": p.name, "broker": p.broker}
+            for p in holding_portfolios
+        ],
     }
 
 

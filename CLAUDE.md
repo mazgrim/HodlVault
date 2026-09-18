@@ -144,6 +144,10 @@ frontend/src/
 
 TWR (Time-Weighted Return) chains sub-period returns measured *before* each cash flow, eliminating contribution/withdrawal distortion.
 
+**Scope portafogli.** Il parametro `portfolio_id` degli endpoint dashboard (`/market/dashboard/*`) e del dettaglio strumento (`/market/instruments/{id}/detail`) accetta un id singolo o una **lista comma-separated** (parsing via `_parse_pf_ids` in `routers/market_data.py`; vuoto = tutti). `_user_portfolio_ids(user_id, db, portfolio_id)` gestisce int | lista | None e restringe sempre ai portafogli dell'utente; le chiavi di cache in `portfolio_chart`/`portfolio_twr_chart` si normalizzano via `_scope_key`. La Dashboard usa la selezione multipla; le altre pagine il single-select.
+
+**Strumenti condivisi tra portafogli.** L'identità dello strumento è il **ticker**, unico a livello globale: lo stesso titolo su broker diversi è lo *stesso* `Instrument` (prezzi/dividendi condivisi, scaricati una volta). La separazione avviene per portafoglio a livello di transazioni/dividendi/posizione. La pagina di dettaglio strumento accetta `portfolio_id` per mostrare transazioni, dividendi e posizione di **un solo portafoglio** (così lo stesso titolo su broker diversi non si mischia); la risposta include `portfolios` = i portafogli che detengono lo strumento, per popolare il filtro in UI (`pages/InstrumentDetail.tsx`).
+
 ### Tools page (`pages/Tools.tsx`)
 
 Standalone financial calculators backed by `/api/tools`, organised in tabs: **Interesse Composto**, **FIRE Calculator**, **PAC vs Lump Sum**, **Inflazione**. The FIRE Calculator (`FireTool`) computes the FIRE Number (net/gross of Italian capital-gains tax), Coast FIRE, and years-to-FIRE via the exact logarithmic formula, plus a withdrawal-phase projection chart. Calculations run client-side; no data is sent to external servers.

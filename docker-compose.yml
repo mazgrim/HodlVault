@@ -1,3 +1,5 @@
+# HodlVault — stack di produzione: il frontend (nginx) serve la build statica e
+# fa da reverse proxy verso il backend FastAPI. Avvio: docker compose up -d --build
 services:
   backend:
     build:

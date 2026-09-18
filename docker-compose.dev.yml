@@ -1,3 +1,5 @@
+# HodlVault — ambiente di sviluppo con hot-reload (Vite sul frontend, Uvicorn
+# --reload sul backend). Avvio: docker compose -f docker-compose.dev.yml up --build
 services:
   backend:
     build:

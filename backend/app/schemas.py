@@ -324,6 +324,27 @@ class DividendMinusUpdate(BaseModel):
     minus_compensation: bool
 
 
+# ── Split / raggruppamento azionario ────────────────────────────────────────────
+
+class StockSplitIn(BaseModel):
+    """Rapporto `old_shares` → `new_shares`: raggruppamento 10:1 = old 10, new 1;
+    split 1:3 = old 1, new 3. Il calcolatore normalizza le transazioni precedenti."""
+    instrument_id: int
+    date: date
+    old_shares: float = Field(gt=0)
+    new_shares: float = Field(gt=0)
+    note: Optional[str] = None
+
+class StockSplitOut(BaseModel):
+    id: int
+    instrument_id: int
+    date: date
+    old_shares: float
+    new_shares: float
+    note: Optional[str]
+    model_config = {"from_attributes": True}
+
+
 # ── Market data ───────────────────────────────────────────────────────────────
 
 class PriceHistoryOut(BaseModel):

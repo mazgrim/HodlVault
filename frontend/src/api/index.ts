@@ -99,6 +99,15 @@ export const couponApi = {
   reset: (id: number) => api.post(`/coupons/${id}/reset`),
 }
 
+// ── Split / raggruppamenti azionari ─────────────────────────────────────────────
+export const splitApi = {
+  list: (instrument_id: number) =>
+    api.get('/splits/', { params: { instrument_id } }),
+  create: (data: { instrument_id: number; date: string; old_shares: number; new_shares: number; note?: string }) =>
+    api.post('/splits/', data),
+  delete: (id: number) => api.delete(`/splits/${id}`),
+}
+
 // ── Performance ───────────────────────────────────────────────────────────────
 export const perfApi = {
   metrics: (portfolio_id?: number, benchmark = 'SWDA.MI') =>

@@ -10,6 +10,7 @@ import ChangeBadge from '../components/ChangeBadge'
 import { PageSpinner } from '../components/Spinner'
 import InstrumentSettingsModal from '../components/InstrumentSettingsModal'
 import CouponScheduleSection from '../components/CouponScheduleSection'
+import SplitSection from '../components/SplitSection'
 import { marketApi } from '../api'
 import { fmtEur, fmtPct, fmtNum, fmtDate, fmtDateTime, fmtTime, pnlClass, pnlSign } from '../utils/format'
 import { useChartTheme } from '../utils/chartTheme'
@@ -651,6 +652,9 @@ export default function InstrumentDetail() {
         quantity={position?.quantity ?? null}
         onChanged={loadDetail}
       />
+
+      {/* ── Split / Raggruppamenti ────────────────────────────────────────── */}
+      <SplitSection instrumentId={instrument.id} onChanged={reloadAll} />
 
       {/* ── Personal Transactions ─────────────────────────────────────────── */}
       <div className="card">

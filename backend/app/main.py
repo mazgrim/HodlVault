@@ -16,7 +16,7 @@ from pathlib import Path
 from .database import engine, Base
 from .migrations import run_migrations
 from .frontend_static import mount_frontend
-from .routers import auth, portfolio, transactions, performance, dividends, import_data, market_data, admin, tools, benchmark, demo, backup, coupons
+from .routers import auth, portfolio, transactions, performance, dividends, import_data, market_data, admin, tools, benchmark, demo, backup, coupons, splits
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -140,6 +140,7 @@ app.include_router(benchmark.router,    prefix="/api/benchmark",   tags=["Benchm
 app.include_router(demo.router,         prefix="/api/demo",        tags=["Demo"])
 app.include_router(backup.router,       prefix="/api/backup",      tags=["Backup"])
 app.include_router(coupons.router,      prefix="/api/coupons",     tags=["Coupons"])
+app.include_router(splits.router,       prefix="/api/splits",      tags=["Splits"])
 
 
 @app.get("/api/health")

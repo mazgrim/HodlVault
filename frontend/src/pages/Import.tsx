@@ -18,11 +18,12 @@ interface ParsedRow {
   duplicate: boolean
   is_dividend: boolean
   warning: string | null
+  excluded: boolean
 }
 
 interface Preview { total: number; duplicates: number }
 
-const BROKERS = ['Fineco', 'Directa', 'Trade Republic']
+const BROKERS = ['Fineco', 'Directa', 'Trade Republic', 'Mediolanum']
 
 // Istruzioni su dove esportare i file, per broker (mostrate in base alla selezione).
 const EXPORT_HELP: Record<string, { title: string; steps: string; imports?: string }[]> = {
@@ -48,6 +49,13 @@ const EXPORT_HELP: Record<string, { title: string; steps: string; imports?: stri
     {
       title: 'Movimenti',
       steps: 'In Directa Libera → sezione Movimenti, seleziona il periodo, poi l\'icona Excel in alto a destra → esporta scegliendo il formato xlsx (consigliato).',
+    },
+  ],
+  Mediolanum: [
+    {
+      title: 'Elenco movimenti',
+      steps: 'Area titoli/dossier → "Elenco movimenti", seleziona il periodo ed esporta (CSV o Excel).',
+      imports: 'Importa acquisti, vendite e dividendi. Il file non contiene ISIN: il titolo è riconosciuto per nome, quindi imposta il ticker nella preview (obbligatorio per i titoli nuovi, l\'ISIN è facoltativo). I movimenti "Versamento/Prelevamento titoli" (cambio denominativo) sono mostrati ma esclusi dall\'import.',
     },
   ],
 }
@@ -139,12 +147,30 @@ export default function Import() {
     })
   }
 
+  // Nome modificabile in anteprima: l'identità è il ticker, quindi rinominare è
+  // sicuro. Utile per ripulire nomi broker prolissi (es. suffissi "Az Fraz Mta").
+  // Si propaga alle altre righe dello stesso strumento (per ISIN, o per nome se
+  // manca l'ISIN come in Mediolanum) usando il nome PRECEDENTE come chiave.
+  const handleNameChange = (idx: number, value: string) => {
+    const newName = value || null
+    setRows(prev => {
+      const src = prev[idx]
+      return prev.map((r, i) => {
+        if (i === idx) return { ...r, name: newName }
+        const sameIsin = src.isin && r.isin && src.isin === r.isin
+        const sameName = !src.isin && !r.isin && src.name && r.name && src.name === r.name
+        if (sameIsin || sameName) return { ...r, name: newName }
+        return r
+      })
+    })
+  }
+
   const handleImport = async () => {
     if (!preview || !portfolioId) return
     setLoading(true)
     setError('')
     try {
-      const toImport = includeDuplicates ? rows : rows.filter(r => !r.duplicate)
+      const toImport = (includeDuplicates ? rows : rows.filter(r => !r.duplicate)).filter(r => !r.excluded)
       const res = await importApi.confirm({ portfolio_id: portfolioId, rows: toImport })
       setResult(res.data)
       setStep('done')
@@ -162,7 +188,7 @@ export default function Import() {
   }
 
   const visibleRows = includeDuplicates ? rows : rows.filter(r => !r.is_dividend || true)
-  const tradeRows = rows.filter(r => !r.is_dividend)
+  const tradeRows = rows.filter(r => !r.is_dividend && !r.excluded)
   const divRows = rows.filter(r => r.is_dividend)
 
   return (
@@ -316,7 +342,7 @@ export default function Import() {
 
               {/* Ticker note */}
               {(() => {
-                const missingTicker = rows.filter(r => !r.ticker)
+                const missingTicker = rows.filter(r => !r.ticker && !r.excluded)
                 if (!missingTicker.length) return null
                 const tradesMissing = missingTicker.filter(r => !r.is_dividend).length
                 const divsMissing   = missingTicker.filter(r => r.is_dividend).length
@@ -336,7 +362,7 @@ export default function Import() {
 
               {/* Avviso vendite senza acquisto */}
               {(() => {
-                const warned = rows.filter(r => r.warning)
+                const warned = rows.filter(r => r.warning && !r.excluded)
                 if (!warned.length) return null
                 return (
                   <div className="flex items-start gap-2 text-amber-400 text-xs bg-amber-900/20 border border-amber-700/30 rounded-lg px-3 py-2">
@@ -345,6 +371,21 @@ export default function Import() {
                       <strong>{warned.length} vendit{warned.length === 1 ? 'a' : 'e'} senza acquisto corrispondente</strong> —
                       la posizione risulterebbe negativa. Probabilmente manca il BUY nel file (importalo, oppure verifica
                       che l'acquisto sia già stato caricato). Puoi comunque procedere: le righe interessate sono evidenziate.
+                    </span>
+                  </div>
+                )
+              })()}
+
+              {/* Avviso righe escluse (trasferimenti / cambio denominativo) */}
+              {(() => {
+                const excluded = rows.filter(r => r.excluded)
+                if (!excluded.length) return null
+                return (
+                  <div className="flex items-start gap-2 text-gray-400 text-xs bg-navy-700/40 border border-gray-600/40 rounded-lg px-3 py-2">
+                    <Info size={14} className="flex-shrink-0 mt-0.5 text-gold-500/80" />
+                    <span>
+                      <strong className="text-gray-300">{excluded.length} rig{excluded.length === 1 ? 'a' : 'he'} di trasferimento/cambio denominativo</strong> —
+                      normalmente un cambio di nome dell'emittente (non movimenta la posizione). Sono <strong>escluse</strong> dall'import.
                     </span>
                   </div>
                 )
@@ -368,11 +409,13 @@ export default function Import() {
                   </thead>
                   <tbody>
                     {rows.map((row, i) => {
-                      const dim = row.duplicate && !includeDuplicates
+                      const dim = row.excluded || (row.duplicate && !includeDuplicates)
                       return (
-                        <tr key={i} className={`border-b border-gray-700/20 ${dim ? 'opacity-40' : ''} ${row.warning ? 'bg-amber-900/10' : ''}`}>
+                        <tr key={i} className={`border-b border-gray-700/20 ${dim ? 'opacity-40' : ''} ${row.warning && !row.excluded ? 'bg-amber-900/10' : ''}`}>
                           <td className="py-2 pl-3 pr-1 whitespace-nowrap">
-                            {row.duplicate
+                            {row.excluded
+                              ? <span className="badge bg-navy-700 text-gray-400 border border-gray-600/40">ESCL</span>
+                              : row.duplicate
                               ? <span className="badge bg-amber-900/40 text-amber-400 border border-amber-700/30">DUP</span>
                               : <span className="badge-green">OK</span>
                             }
@@ -397,7 +440,15 @@ export default function Import() {
                               inputClassName="bg-navy-700 border border-gray-600/50 rounded px-2 py-1 pr-6 text-xs text-gray-100 font-mono uppercase w-full focus:outline-none focus:border-gold-500/60 placeholder-gray-600"
                             />
                           </td>
-                          <td className="py-2 px-3 text-gray-300 max-w-[150px] truncate">{row.name || '—'}</td>
+                          <td className="py-2 px-2 min-w-[150px]">
+                            <input
+                              type="text"
+                              value={row.name ?? ''}
+                              onChange={e => handleNameChange(i, e.target.value)}
+                              placeholder="nome…"
+                              className="bg-navy-700 border border-gray-600/50 rounded px-2 py-1 text-xs text-gray-200 w-full focus:outline-none focus:border-gold-500/60 placeholder-gray-600"
+                            />
+                          </td>
                           <td className="py-2 px-3 tabular-nums text-gray-300 whitespace-nowrap">
                             {row.is_dividend
                               ? <span className="text-purple-300">{fmtNum(row.price, 2)} {row.currency}</span>
@@ -416,7 +467,7 @@ export default function Import() {
               </div>
 
               {(() => {
-                const toImport  = includeDuplicates ? rows : rows.filter(r => !r.duplicate)
+                const toImport  = (includeDuplicates ? rows : rows.filter(r => !r.duplicate)).filter(r => !r.excluded)
                 const willSkip  = toImport.filter(r => !r.ticker).length
                 return (
                   <div className="flex flex-wrap items-center gap-3">
@@ -458,6 +509,14 @@ export default function Import() {
               Export CSV dalla app TR. Importa: acquisti, vendite, dividendi e Saveback.
               Il Saveback viene classificato come BUY (acquisto quote ETF), non come dividendo.
               Il backend suggerisce il ticker da ISIN; puoi correggerlo nella preview prima di confermare.
+            </p>
+          </div>
+          <div>
+            <div className="font-medium text-gray-300 mb-1">Mediolanum</div>
+            <p>
+              Export "Elenco movimenti" (CSV o Excel). Importa acquisti, vendite e dividendi.
+              Non contiene ISIN: imposta il ticker nella preview (l'ISIN è facoltativo).
+              I movimenti di versamento/prelevamento titoli (cambio denominativo) sono esclusi dall'import.
             </p>
           </div>
         </div>

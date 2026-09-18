@@ -12,6 +12,7 @@ from ..auth import get_current_user, require_write
 from ..services.parsers.fineco import FinecoParser
 from ..services.parsers.directa import DirectaParser
 from ..services.parsers.trade_republic import TradeRepublicParser
+from ..services.parsers.mediolanum import MediolanumParser
 from ..services.market import MarketService
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ PARSERS = {
     "fineco": FinecoParser,
     "directa": DirectaParser,
     "trade_republic": TradeRepublicParser,
+    "mediolanum": MediolanumParser,
 }
 
 
@@ -162,12 +164,14 @@ async def import_preview(
         if row.isin and not row.ticker and row.isin in isin_ticker_map:
             row.ticker = isin_ticker_map[row.isin]
 
-    # Dividendi senza ISIN (Fineco "Movimenti conto"): suggerisci il ticker già in
-    # anteprima agganciando il nome a uno strumento già presente nel portafoglio,
-    # invece di lasciarlo vuoto (il match per nome girava solo in fase di conferma).
-    # Resta modificabile dall'utente; se non c'è match il campo resta vuoto.
+    # Righe senza ISIN né ticker (dividendi Fineco "Movimenti conto", ma anche
+    # compravendite e dividendi Mediolanum che non hanno mai l'ISIN): suggerisci il
+    # ticker agganciando il NOME a uno strumento già presente nel portafoglio,
+    # invece di lasciarlo vuoto. Resta modificabile dall'utente; se non c'è match
+    # (es. primo acquisto di un titolo nuovo) il campo resta vuoto. Le righe escluse
+    # non vanno importate, quindi non ricevono suggerimenti.
     for row in rows:
-        if row.is_dividend and not row.ticker and not row.isin and row.name:
+        if not row.excluded and not row.ticker and not row.isin and row.name:
             inst = _match_instrument_by_name(portfolio_id, row.name, db)
             if inst:
                 row.ticker = inst.ticker
@@ -208,6 +212,10 @@ async def import_confirm(
     seen_instrument_ids: set = set()
 
     for row in payload.rows:
+        # Righe escluse di default (es. trasferimento/cambio denominativo titoli
+        # Mediolanum): il frontend le filtra già, ma guardia difensiva se arrivano.
+        if getattr(row, "excluded", False):
+            continue
         if row.duplicate:
             skipped += 1
             continue
@@ -244,6 +252,13 @@ async def import_confirm(
             if not instrument:
                 no_ticker += 1
                 continue
+
+            # Senza ISIN (Mediolanum & simili) il nome del file/anteprima è
+            # autorevole per uno strumento appena creato: l'utente può ripulirlo in
+            # preview (nomi broker prolissi, es. suffissi "Az Fraz Mta"), mentre Yahoo userebbe
+            # il suo longName. Con ISIN il comportamento resta invariato.
+            if is_new and not row.isin and row.name and instrument.name != row.name:
+                instrument.name = row.name
 
         fx_rate = await svc.get_fx_rate_for_date(row.currency, row.date)
         if row.is_dividend:

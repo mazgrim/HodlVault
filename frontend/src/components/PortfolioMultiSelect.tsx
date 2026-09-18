@@ -90,23 +90,46 @@ export default function PortfolioMultiSelect({ portfolios, selected, onChange }:
           {portfolios.map((p) => {
             const checked = selected.includes(p.id)
             return (
-              <button
+              <div
                 key={p.id}
-                type="button"
-                onClick={() => toggle(p.id)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-navy-700 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-navy-700 transition-colors group"
                 role="option"
                 aria-selected={checked}
               >
-                <span className={`w-4 h-4 flex items-center justify-center rounded border ${checked ? 'bg-emerald-500 border-emerald-500' : 'border-gray-500'}`}>
-                  {checked && <Check size={12} className="text-navy-900" />}
-                </span>
-                <span className="truncate text-gray-200">
+                {/* Casella: aggiunge/toglie dalla selezione multipla (non chiude) */}
+                <button
+                  type="button"
+                  onClick={() => toggle(p.id)}
+                  title={checked ? 'Togli dalla selezione' : 'Aggiungi alla selezione'}
+                  className="flex-shrink-0"
+                >
+                  <span className={`w-4 h-4 flex items-center justify-center rounded border ${checked ? 'bg-emerald-500 border-emerald-500' : 'border-gray-500'}`}>
+                    {checked && <Check size={12} className="text-navy-900" />}
+                  </span>
+                </button>
+                {/* Nome: mostra SOLO questo portafoglio */}
+                <button
+                  type="button"
+                  onClick={() => { onChange([p.id]); setOpen(false) }}
+                  title="Mostra solo questo portafoglio"
+                  className="flex-1 min-w-0 text-left truncate text-gray-200"
+                >
                   {p.name}{p.broker ? <span className="text-gray-500"> — {p.broker}</span> : null}
-                </span>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { onChange([p.id]); setOpen(false) }}
+                  className="flex-shrink-0 text-[10px] uppercase tracking-wide text-gold-500/70 hover:text-gold-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  Solo
+                </button>
+              </div>
             )
           })}
+
+          <div className="border-t border-gray-700/50 mt-1 px-3 py-1.5 text-[10px] text-gray-500 leading-snug">
+            Clicca il <span className="text-gray-400">nome</span> per vederne uno solo · la <span className="text-gray-400">casella</span> per combinarne più
+          </div>
         </div>
       )}
     </div>

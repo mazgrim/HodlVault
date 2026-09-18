@@ -71,7 +71,7 @@ export default function PortfolioMultiSelect({ portfolios, selected, onChange }:
 
       {open && (
         <div
-          className="absolute right-0 z-20 mt-1 w-64 max-h-80 overflow-y-auto rounded-lg border border-gray-600/50 bg-navy-800 shadow-xl py-1"
+          className="absolute right-0 z-20 mt-1 w-80 max-w-[calc(100vw-2rem)] max-h-80 overflow-y-auto rounded-lg border border-gray-600/50 bg-navy-800 shadow-xl py-1"
           role="listbox"
         >
           <button
@@ -107,21 +107,21 @@ export default function PortfolioMultiSelect({ portfolios, selected, onChange }:
                     {checked && <Check size={12} className="text-navy-900" />}
                   </span>
                 </button>
-                {/* Nome: mostra SOLO questo portafoglio */}
+                {/* Nome (+ broker sotto) e badge "Solo": clic ovunque qui → mostra
+                    SOLO questo portafoglio. */}
                 <button
                   type="button"
                   onClick={() => { onChange([p.id]); setOpen(false) }}
                   title="Mostra solo questo portafoglio"
-                  className="flex-1 min-w-0 text-left truncate text-gray-200"
+                  className="flex-1 min-w-0 flex items-center gap-2 text-left"
                 >
-                  {p.name}{p.broker ? <span className="text-gray-500"> — {p.broker}</span> : null}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { onChange([p.id]); setOpen(false) }}
-                  className="flex-shrink-0 text-[10px] uppercase tracking-wide text-gold-500/70 hover:text-gold-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  Solo
+                  <span className="flex-1 min-w-0">
+                    <span className="block truncate text-gray-200">{p.name}</span>
+                    {p.broker && <span className="block truncate text-xs text-gray-500">{p.broker}</span>}
+                  </span>
+                  <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border border-gold-500/40 text-gold-400/80 group-hover:bg-gold-500/20 group-hover:text-gold-300 transition-colors">
+                    Solo
+                  </span>
                 </button>
               </div>
             )

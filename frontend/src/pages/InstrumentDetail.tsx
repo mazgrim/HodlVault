@@ -83,6 +83,7 @@ interface InstrumentDetailData {
   position: PositionKPI | null
   transactions: TxRow[]
   dividends: DivRow[]
+  dividends_total_eur: number
   buy_dates: string[]
   sell_dates: string[]
   portfolios: PortfolioRef[]
@@ -272,7 +273,7 @@ export default function InstrumentDetail() {
     )
   }
 
-  const { instrument, position, transactions, dividends, buy_dates, sell_dates, portfolios } = detail
+  const { instrument, position, transactions, dividends, dividends_total_eur, buy_dates, sell_dates, portfolios } = detail
 
   // ── Period change (from the visible chart): native price move first→last,
   // plus the EUR move on the held position (price delta at today's FX rate). ──
@@ -730,7 +731,7 @@ export default function InstrumentDetail() {
               </thead>
               <tbody>
                 {dividends.map(div => (
-                  <tr key={div.id} className="table-row-hover border-b border-gray-700/20 last:border-0">
+                  <tr key={div.id} className="table-row-hover border-b border-gray-700/20">
                     <td className="py-3 pr-4 text-gray-300 whitespace-nowrap">{fmtDate(div.date)}</td>
                     <td className="py-3 pr-4">
                       <span className={div.type === 'DIVIDEND' ? 'badge-green' : 'badge-gold'}>
@@ -741,6 +742,12 @@ export default function InstrumentDetail() {
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-gray-600/50">
+                  <td className="py-3 pr-4 text-gray-300 font-semibold" colSpan={2}>Totale incassato</td>
+                  <td className="py-3 tabular-nums text-emerald-300 font-bold">{fmtEur(dividends_total_eur)}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>

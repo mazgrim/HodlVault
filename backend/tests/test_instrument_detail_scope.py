@@ -73,3 +73,21 @@ def test_detail_filtrato_broker_a_resta_aperto(client, db, user, portfolio):
     d = _detail(client, inst.id, pf_a.id)
     assert len(d["transactions"]) == 2
     assert d["position"]["quantity"] == 22
+
+
+def test_detail_dividendi_convertiti_eur_e_totale(client, db, user, portfolio):
+    inst = models.Instrument(ticker="GAMMA.MI", isin=None, name="Gamma", currency="USD")
+    db.add(inst); db.flush()
+    # Un dividendo EUR (fx 1.0 → 5.00) e uno in USD (fx 2.0 → 5.00 EUR).
+    db.add(models.DividendEvent(portfolio_id=portfolio.id, instrument_id=inst.id,
+        date=date(2025, 3, 1), amount=5.0, gross_amount=5.0, currency="EUR",
+        fx_rate=1.0, type=models.DividendType.DIVIDEND, source=models.DividendSource.IMPORT))
+    db.add(models.DividendEvent(portfolio_id=portfolio.id, instrument_id=inst.id,
+        date=date(2025, 6, 1), amount=10.0, gross_amount=10.0, currency="USD",
+        fx_rate=2.0, type=models.DividendType.DIVIDEND, source=models.DividendSource.IMPORT))
+    db.commit()
+
+    d = _detail(client, inst.id)
+    amounts = sorted(x["amount"] for x in d["dividends"])
+    assert amounts == [5.0, 5.0]                 # USD 10 / fx 2 = 5 EUR
+    assert d["dividends_total_eur"] == 10.0      # 5 + 5

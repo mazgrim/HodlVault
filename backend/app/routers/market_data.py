@@ -351,12 +351,16 @@ def instrument_detail(
             {
                 "id":       div.id,
                 "date":     div.date.isoformat(),
-                "amount":   div.amount,
+                # Netto convertito in EUR (l'evento salva l'importo nella valuta
+                # dello strumento + fx_rate; la UI mostra sempre EUR).
+                "amount":   round(div.amount / (div.fx_rate or 1), 2),
                 "currency": div.currency,
                 "type":     div.type.value,
             }
             for div in divs
         ],
+        # Totale dei dividendi/cedole incassati per questo strumento (netto, EUR).
+        "dividends_total_eur": round(sum(d.amount / (d.fx_rate or 1) for d in divs), 2),
         "buy_dates": buy_dates,
         "sell_dates": sell_dates,
         # Portafogli che detengono lo strumento — per il filtro in UI.
